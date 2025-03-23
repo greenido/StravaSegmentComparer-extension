@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn {
+    @apply inline-flex justify-center items-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-[#fc4c02] hover:bg-[#e34500] focus:outline-none;
+  }
+  
+  .input-field {
+    @apply block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#fc4c02] focus:border-[#fc4c02] sm:text-sm;
+  }
+  
+  .card {
+    @apply bg-white rounded-lg shadow p-4;
+  }
+  
+  .status-message {
+    @apply p-2 mb-3 rounded-md text-sm;
+  }
+  
+  .status-error {
+    @apply bg-red-50 text-red-700 border border-red-200;
+  }
+  
+  .status-loading {
+    @apply bg-blue-50 text-blue-700 border border-blue-200;
+  }
+  
+  .status-success {
+    @apply bg-green-50 text-green-700 border border-green-200;
+  }
+  
+  .positive-diff {
+    @apply text-red-600;
+  }
+  
+  .negative-diff {
+    @apply text-green-600;
+  }
+  
+  .log-container {
+    @apply mt-4 bg-white rounded-lg shadow p-3;
+  }
+  
+  .log-header {
+    @apply text-[#fc4c02] text-sm font-semibold border-b border-gray-200 pb-2 mb-2 flex items-center;
+  }
+  
+  .log-content {
+    @apply h-24 overflow-y-auto font-mono text-xs bg-gray-900 text-gray-100 rounded p-2 border border-gray-700;
+  }
+  
+  .log-entry {
+    @apply mb-1 pb-1 border-b border-dotted border-gray-700;
+  }
+  
+  .log-timestamp {
+    @apply text-gray-500 mr-2 font-bold;
+  }
+  
+  .log-info {
+    @apply text-blue-400;
+  }
+  
+  .log-success {
+    @apply text-green-400;
+  }
+  
+  .log-error {
+    @apply text-red-400;
+  }
+  
+  .log-warning {
+    @apply text-yellow-400;
+  }
+}
