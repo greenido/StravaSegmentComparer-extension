@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Strava Segment Comparator</title>
+  <link rel="stylesheet" href="popup.css">
+  <!-- Simple-DataTables CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css" rel="stylesheet" type="text/css">
+</head>
+<body>
+  <div class="container">
+    <h1>Strava Segment Comparator</h1>
+    
+    <div class="form-container">
+      <div class="input-group">
+        <label for="activity1">Activity 1 URL:</label>
+        <input type="url" id="activity1" placeholder="https://www.strava.com/activities/..." required>
+      </div>
+      
+      <div class="input-group">
+        <label for="activity2">Activity 2 URL:</label>
+        <input type="url" id="activity2" placeholder="https://www.strava.com/activities/..." required>
+      </div>
+      
+      <button id="compareBtn">Compare Activities</button>
+    </div>
+    
+    <div id="status" class="status"></div>
+    
+    <div id="results" class="results-container hide">
+      <div class="table-controls">
+        <div class="search-container">
+          <input type="text" id="tableSearch" placeholder="Filter segments...">
+        </div>
+        <button id="exportBtn">Export as CSV</button>
+      </div>
+      
+      <div class="table-container">
+        <table id="segmentsTable" class="segments-table">
+          <thead>
+            <tr>
+              <th>Segment Name</th>
+              <th>Time 1</th>
+              <th>Time 2</th>
+              <th>Time Diff</th>
+              <th>Speed 1</th>
+              <th>Speed 2</th>
+              <th>Speed Diff</th>
+            </tr>
+          </thead>
+          <tbody id="segmentsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simple-DataTables JS -->
+  <script src="https://cdn.jsdelivr.net/npm/simple-datatables@latest"></script>
+  <script src="utils.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

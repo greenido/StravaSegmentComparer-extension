@@ -1,0 +1,54 @@
+modules = ["nodejs-20", "python-3.11"]
+
+[nix]
+channel = "stable-24_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Strava Extension Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "chrome_extension_check"
+
+[[workflows.workflow]]
+name = "Strava Extension Server"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m http.server 5000"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "chrome_extension_check"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = """
+ls -la && echo \"
+Directories and files structure:\" && find . -type f | sort"""
+
+[deployment]
+run = ["sh", "-c", "python -m http.server 5000"]

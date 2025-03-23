@@ -1,0 +1,188 @@
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f7f7fa;
+  color: #333;
+}
+
+.container {
+  width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1 {
+  color: #fc4c02; /* Strava orange */
+  text-align: center;
+  font-size: 1.5rem;
+  margin-bottom: 20px;
+}
+
+.form-container {
+  background-color: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
+.input-group {
+  margin-bottom: 15px;
+}
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: #333;
+}
+
+input[type="url"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+input[type="url"]:focus {
+  border-color: #fc4c02;
+  outline: none;
+}
+
+button {
+  background-color: #fc4c02;
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #e34500;
+}
+
+#compareBtn {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.status {
+  padding: 10px;
+  margin-bottom: 15px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.error {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.loading {
+  background-color: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+}
+
+.success {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+.hide {
+  display: none;
+}
+
+.results-container {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 15px;
+}
+
+.table-controls {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  align-items: center;
+}
+
+.search-container {
+  flex-grow: 1;
+  margin-right: 15px;
+}
+
+#tableSearch {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+#exportBtn {
+  white-space: nowrap;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.segments-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.segments-table th,
+.segments-table td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.segments-table th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+}
+
+.segments-table tr:hover {
+  background-color: #f9f9f9;
+}
+
+.positive-diff {
+  color: #c62828; /* Red for slower time/speed */
+}
+
+.negative-diff {
+  color: #2e7d32; /* Green for faster time/speed */
+}
+
+/* Simple-DataTables customization */
+.dataTable-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.dataTable-top,
+.dataTable-bottom {
+  padding: 8px 0;
+}
+
+.dataTable-input {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.dataTable-selector {
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
