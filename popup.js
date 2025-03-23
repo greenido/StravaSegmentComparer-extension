@@ -94,7 +94,7 @@ async function compareActivities() {
     showStatus(`Successfully compared ${comparisonData.length} segments`, 'success');
     
     // Show results container
-    resultsDiv.classList.remove('hide');
+    resultsDiv.classList.remove('hidden');
     
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
@@ -338,7 +338,19 @@ function exportAsCSV() {
 // Show status message
 function showStatus(message, type = 'info') {
   statusDiv.textContent = message;
-  statusDiv.className = 'status ' + type;
+  statusDiv.className = 'status-message';
+  
+  // Add appropriate class based on type
+  if (type === 'error') {
+    statusDiv.classList.add('status-error');
+  } else if (type === 'loading') {
+    statusDiv.classList.add('status-loading');
+  } else if (type === 'success') {
+    statusDiv.classList.add('status-success');
+  }
+  
+  // Show the status div
+  statusDiv.classList.remove('hidden');
   
   // Also log this message
   addLogEntry(message, type);
