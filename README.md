@@ -1,4 +1,4 @@
-# Strava Segment Comparator Extension
+# 🚴🏼‍♂️ Strava Segment Comparator Extension 🏃🏼‍♀️
 
 This is a Chrome extension that allows users to compare two Strava activities by their segments. The extension provides a user-friendly interface to input activity URLs, compare segments, and export the comparison data as a CSV file.
 
