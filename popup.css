@@ -186,3 +186,113 @@ button:hover {
   border: 1px solid #ddd;
   border-radius: 4px;
 }
+
+/* Log container styles */
+.log-container {
+  margin-top: 20px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 15px;
+}
+
+.log-container h3 {
+  margin-top: 0;
+  color: #fc4c02;
+  font-size: 1.1rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.log-container h3::before {
+  content: "\1F4C4"; /* 📄 document icon */
+  margin-right: 8px;
+  font-size: 1.2rem;
+}
+
+.log-content {
+  max-height: 200px; /* Increased height for better visibility */
+  overflow-y: auto;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 12px;
+  background-color: #1e1e1e; /* Dark background for better readability */
+  color: #f0f0f0; /* Light text for contrast */
+  border-radius: 4px;
+  padding: 10px;
+  border: 1px solid #333;
+  line-height: 1.5;
+}
+
+.log-entry {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dotted #444;
+  position: relative;
+  padding-left: 2px;
+  transition: background-color 0.15s ease;
+}
+
+.log-entry:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.log-timestamp {
+  color: #999;
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+/* Log type styling with icons */
+.log-info {
+  color: #64b5f6; /* Light blue */
+}
+.log-info::before {
+  content: "ℹ️ ";
+  margin-right: 2px;
+}
+
+.log-success {
+  color: #81c784; /* Light green */
+}
+.log-success::before {
+  content: "✅ ";
+  margin-right: 2px;
+}
+
+.log-error {
+  color: #e57373; /* Light red */
+}
+.log-error::before {
+  content: "❌ ";
+  margin-right: 2px;
+}
+
+.log-warning {
+  color: #ffb74d; /* Light orange */
+}
+.log-warning::before {
+  content: "⚠️ ";
+  margin-right: 2px;
+}
+
+/* Scrollbar styling for the log container */
+.log-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-content::-webkit-scrollbar-track {
+  background: #2e2e2e;
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}

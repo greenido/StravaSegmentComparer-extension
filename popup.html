@@ -6,7 +6,7 @@
   <title>Strava Segment Comparator</title>
   <link rel="stylesheet" href="popup.css">
   <!-- Simple-DataTables CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css" rel="stylesheet" type="text/css">
+  <link href="lib/simple-datatables.css" rel="stylesheet" type="text/css">
 </head>
 <body>
   <div class="container">
@@ -53,10 +53,16 @@
         </table>
       </div>
     </div>
+    
+    <!-- Added log container -->
+    <div id="logContainer" class="log-container">
+      <h3>Activity Logs</h3>
+      <div id="logContent" class="log-content"></div>
+    </div>
   </div>
 
   <!-- Simple-DataTables JS -->
-  <script src="https://cdn.jsdelivr.net/npm/simple-datatables@latest"></script>
+  <script src="lib/simple-datatables.js"></script>
   <script src="utils.js"></script>
   <script src="popup.js"></script>
 </body>
