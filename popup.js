@@ -14,8 +14,7 @@ const logContent = document.getElementById('logContent');
 // Log entries array to track all messages
 let logEntries = [];
 
-// Key for localStorage
-const STORAGE_KEY = 'stravaSegmentComparison';
+// Global variables
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', () => {
@@ -280,7 +279,7 @@ function displayResults(data) {
   dataTable = new DataTableConstructor("#segmentsTable", {
     searchable: true,
     fixedHeight: false,
-    perPage: 10
+    perPage: 50
   });
   
   addLogEntry('Table setup complete', 'success');
@@ -401,125 +400,4 @@ function getSpeedDiffClass(speedDiff) {
   return '';
 }
 
-// Save comparison results to localStorage
-function saveResultsToStorage() {
-  if (!comparisonData || comparisonData.length === 0) {
-    showStatus('No data to save', 'error');
-    return;
-  }
-  
-  addLogEntry('Saving comparison results to localStorage...', 'info');
-  
-  // Create storage object with timestamp
-  const storageData = {
-    timestamp: new Date().toISOString(),
-    activity1Url: activity1Input.value,
-    activity2Url: activity2Input.value,
-    comparisonData: comparisonData
-  };
-  
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
-    addLogEntry(`Saved ${comparisonData.length} segment comparisons to localStorage`, 'success');
-    showStatus('Results saved successfully', 'success');
-    
-    // Update UI to show saved indicator
-    updateSavedDataIndicator(true);
-  } catch (error) {
-    addLogEntry(`Error saving data: ${error.message}`, 'error');
-    showStatus('Error saving results', 'error');
-  }
-}
 
-// Load comparison results from localStorage
-function loadResultsFromStorage() {
-  addLogEntry('Attempting to load saved results from localStorage...', 'info');
-  
-  try {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-    if (!savedData) {
-      addLogEntry('No saved results found in localStorage', 'warning');
-      showStatus('No saved results found', 'warning');
-      return;
-    }
-    
-    // Parse the saved data
-    const parsedData = JSON.parse(savedData);
-    
-    // Update UI with loaded data
-    if (parsedData.activity1Url) activity1Input.value = parsedData.activity1Url;
-    if (parsedData.activity2Url) activity2Input.value = parsedData.activity2Url;
-    
-    // Update the comparison data and display results
-    comparisonData = parsedData.comparisonData || [];
-    
-    if (comparisonData.length > 0) {
-      addLogEntry(`Loaded ${comparisonData.length} segment comparisons from localStorage`, 'success');
-      displayResults(comparisonData);
-      resultsDiv.classList.remove('hide');
-      
-      // Format timestamp for display
-      const savedTimestamp = new Date(parsedData.timestamp);
-      const formattedTimestamp = savedTimestamp.toLocaleString();
-      
-      showStatus(`Loaded saved results from ${formattedTimestamp}`, 'success');
-    } else {
-      addLogEntry('Saved data contained no comparison results', 'warning');
-      showStatus('No comparison data in saved results', 'warning');
-    }
-  } catch (error) {
-    addLogEntry(`Error loading data: ${error.message}`, 'error');
-    showStatus('Error loading saved results', 'error');
-  }
-}
-
-// Clear saved results from localStorage
-function clearSavedResults() {
-  addLogEntry('Clearing saved results from localStorage...', 'info');
-  
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-    addLogEntry('Saved results cleared successfully', 'success');
-    showStatus('Saved results cleared', 'success');
-    
-    // Update UI to show no saved data
-    updateSavedDataIndicator(false);
-  } catch (error) {
-    addLogEntry(`Error clearing data: ${error.message}`, 'error');
-    showStatus('Error clearing saved results', 'error');
-  }
-}
-
-// Check if saved results exist
-function checkForSavedResults() {
-  try {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-    updateSavedDataIndicator(!!savedData);
-    
-    if (savedData) {
-      addLogEntry('Found saved comparison results in localStorage', 'info');
-    }
-  } catch (error) {
-    console.error('Error checking for saved results:', error);
-  }
-}
-
-// Update UI to indicate if saved data exists
-function updateSavedDataIndicator(hasSavedData) {
-  const loadResultsBtn = document.getElementById('loadResultsBtn');
-  const clearResultsBtn = document.getElementById('clearSavedBtn');
-  
-  if (loadResultsBtn) {
-    if (hasSavedData) {
-      loadResultsBtn.disabled = false;
-      loadResultsBtn.title = 'Load saved comparison results';
-    } else {
-      loadResultsBtn.disabled = true;
-      loadResultsBtn.title = 'No saved results available';
-    }
-  }
-  
-  if (clearResultsBtn) {
-    clearResultsBtn.disabled = !hasSavedData;
-  }
-}
