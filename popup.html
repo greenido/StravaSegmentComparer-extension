@@ -33,7 +33,15 @@
         <div class="search-container">
           <input type="text" id="tableSearch" placeholder="Filter segments...">
         </div>
-        <button id="exportBtn">Export as CSV</button>
+        <div class="button-container">
+          <!-- Export Button -->
+          <button id="exportBtn" title="Export data as CSV file">Export as CSV</button>
+          
+          <!-- Results Storage Buttons -->
+          <button id="saveResultsBtn" title="Save results to localStorage">Save Results</button>
+          <button id="loadResultsBtn" title="Load saved results" disabled>Load Saved</button>
+          <button id="clearSavedBtn" title="Clear saved results" disabled>Clear Saved</button>
+        </div>
       </div>
       
       <div class="table-container">

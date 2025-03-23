@@ -128,28 +128,46 @@ function extractSegmentData() {
   return activityData;
 }
 
-// Inject helper script to page
-function injectHelperScript() {
-  const script = document.createElement('script');
-  script.textContent = `
-    // Function to notify that the page has loaded all dynamic content
-    function notifyContentLoaded() {
-      // Check if segments are loaded
-      if (document.querySelector('.segments-list')) {
-        document.dispatchEvent(new CustomEvent('stravaPageLoaded'));
-      } else {
-        // Wait and check again
-        setTimeout(notifyContentLoaded, 500);
-      }
-    }
-    
-    // Start checking
-    setTimeout(notifyContentLoaded, 1000);
-  `;
+// Use MutationObserver instead of injecting scripts
+function setupSegmentMonitor() {
+  console.log('Setting up segment monitor...');
   
-  document.head.appendChild(script);
-  script.remove();
+  // Function to check if segments are loaded
+  function checkForSegments() {
+    if (document.querySelector('.segments-list')) {
+      console.log('Segments detected in the page!');
+      document.dispatchEvent(new CustomEvent('extractSegmentData'));
+      return true;
+    }
+    return false;
+  }
+  
+  // Check immediately in case the segments are already loaded
+  if (checkForSegments()) {
+    return;
+  }
+  
+  // Otherwise, set up a MutationObserver to watch for changes
+  console.log('Segments not found yet, setting up observer...');
+  
+  const observer = new MutationObserver((mutations) => {
+    if (checkForSegments()) {
+      observer.disconnect();
+    }
+  });
+  
+  // Start observing the document body for DOM changes
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  
+  // Set a timeout to stop observing after a reasonable time
+  setTimeout(() => {
+    observer.disconnect();
+    console.log('Segment detection timeout reached');
+  }, 30000); // 30 seconds timeout
 }
 
 // Run on page load
-injectHelperScript();
+setupSegmentMonitor();

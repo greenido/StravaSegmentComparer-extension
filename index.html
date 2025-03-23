@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Strava Segment Comparator Extension</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      color: #333;
+    }
+    h1 {
+      color: #FC4C02; /* Strava orange */
+      border-bottom: 2px solid #FC4C02;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #FC4C02;
+      margin-top: 30px;
+    }
+    code {
+      background-color: #f5f5f5;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .step {
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f9f9f9;
+      border-left: 4px solid #FC4C02;
+    }
+    .note {
+      background-color: #fffde7;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 20px 0;
+      border-left: 4px solid #ffca28;
+    }
+    .download-btn {
+      display: inline-block;
+      background-color: #FC4C02;
+      color: white;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 5px;
+      font-weight: bold;
+      margin: 20px 0;
+    }
+    .download-btn:hover {
+      background-color: #e24402;
+    }
+    img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 5px;
+      margin: 10px 0;
+    }
+    ul li {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Strava Segment Comparator Chrome Extension</h1>
+  
+  <p>This Chrome extension allows you to compare segments between two Strava activities and presents the data in a sortable, filterable table.</p>
+  
+  <a href="strava-segment-comparator.zip" class="download-btn">Download Extension</a>
+  
+  <h2>Features</h2>
+  <ul>
+    <li>Compare segment data between two Strava activities</li>
+    <li>View time differences and speed differences for each segment</li>
+    <li>Sort and filter the comparison data</li>
+    <li>Save comparison results for later viewing</li>
+    <li>Export results as CSV</li>
+  </ul>
+  
+  <h2>Installation Instructions</h2>
+  
+  <div class="step">
+    <h3>Step 1: Download the Extension</h3>
+    <p>Click the "Download Extension" button above to download a ZIP file containing the extension.</p>
+  </div>
+  
+  <div class="step">
+    <h3>Step 2: Extract the ZIP File</h3>
+    <p>Extract the contents of the ZIP file to a folder on your computer.</p>
+  </div>
+  
+  <div class="step">
+    <h3>Step 3: Load the Extension in Chrome</h3>
+    <ol>
+      <li>Open Google Chrome</li>
+      <li>Navigate to <code>chrome://extensions/</code></li>
+      <li>Enable "Developer mode" using the toggle in the top right corner</li>
+      <li>Click "Load unpacked"</li>
+      <li>Select the folder where you extracted the extension files</li>
+    </ol>
+  </div>
+  
+  <div class="note">
+    <p><strong>Note:</strong> The extension should now appear in your Chrome toolbar. You might need to click the puzzle piece icon to see and pin it.</p>
+  </div>
+  
+  <h2>How to Use</h2>
+  
+  <div class="step">
+    <h3>Step 1: Open Strava Activities</h3>
+    <p>Navigate to a Strava activity page that contains segments. The extension will automatically detect the current activity URL.</p>
+  </div>
+  
+  <div class="step">
+    <h3>Step 2: Compare Activities</h3>
+    <p>Click the extension icon in your browser toolbar to open the popup.</p>
+    <ol>
+      <li>Enter two Strava activity URLs in the input fields</li>
+      <li>Click "Compare Activities"</li>
+      <li>The extension will open tabs to extract segment data from both activities</li>
+      <li>Once complete, the results will be displayed in a table</li>
+    </ol>
+  </div>
+  
+  <div class="step">
+    <h3>Step 3: Analyze Results</h3>
+    <p>The table shows segment name, times, speeds, and the differences between the two activities:</p>
+    <ul>
+      <li>Green values indicate faster times or higher speeds</li>
+      <li>Red values indicate slower times or lower speeds</li>
+      <li>Use the search field to filter for specific segments</li>
+      <li>Click column headers to sort by that column</li>
+    </ul>
+  </div>
+  
+  <div class="step">
+    <h3>Step 4: Save or Export Results</h3>
+    <p>You can:</p>
+    <ul>
+      <li>Click "Save Results" to store the comparison in your browser's localStorage</li>
+      <li>Click "Load Saved" to retrieve previously saved comparison data</li>
+      <li>Click "Export as CSV" to download the data as a CSV file for further analysis</li>
+    </ul>
+  </div>
+  
+  <div class="note">
+    <p><strong>Privacy Note:</strong> This extension operates entirely in your browser. No data is sent to any server.</p>
+  </div>
+  
+  <h2>Files in this Extension</h2>
+  <ul>
+    <li><code>manifest.json</code> - Extension configuration</li>
+    <li><code>popup.html</code> - The extension popup interface</li>
+    <li><code>popup.js</code> - Main functionality for the popup</li>
+    <li><code>popup.css</code> - Styling for the popup</li>
+    <li><code>content-script.js</code> - Script that extracts segment data from Strava</li>
+    <li><code>background.js</code> - Background service worker</li>
+    <li><code>utils.js</code> - Utility functions</li>
+    <li><code>lib/</code> - Libraries used by the extension</li>
+  </ul>
+  
+  <footer style="margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; color: #777;">
+    <p>This extension is for personal use only and is not affiliated with Strava.</p>
+  </footer>
+</body>
+</html>
