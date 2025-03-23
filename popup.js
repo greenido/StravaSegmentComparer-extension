@@ -23,15 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   
-  // Add save/load/clear buttons if they exist
-  const saveResultsBtn = document.getElementById('saveResultsBtn');
-  const loadResultsBtn = document.getElementById('loadResultsBtn');
-  const clearResultsBtn = document.getElementById('clearSavedBtn');
-  
-  if (saveResultsBtn) saveResultsBtn.addEventListener('click', saveResultsToStorage);
-  if (loadResultsBtn) loadResultsBtn.addEventListener('click', loadResultsFromStorage);
-  if (clearResultsBtn) clearResultsBtn.addEventListener('click', clearSavedResults);
-  
   // Check if we're on a Strava activity page and pre-fill the first input
   chrome.tabs.query({active: true, currentWindow: true}, tabs => {
     const url = tabs[0].url;
@@ -45,9 +36,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.activity1) activity1Input.value = data.activity1;
     if (data.activity2) activity2Input.value = data.activity2;
   });
-  
-  // Auto-load saved results if they exist
-  checkForSavedResults();
 });
 
 // Extract activity ID from Strava URL
