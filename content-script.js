@@ -58,11 +58,11 @@ function extractSegmentData() {
   
   // Try different possible selectors for the segments table
   const segmentSelectors = [
-    '.segments-list',                   // Main selector
-    '.segments table',                  // Alternative selector
+    // '.segments-list',                   // Main selector
+    // '.segments table',                  // Alternative selector
     'table.segments',                   // Another possible selector
-    '[data-react-class="SegmentLeaderboard"]', // React component
-    '.segment-efforts'                  // Another possible container
+    // '[data-react-class="SegmentLeaderboard"]', // React component
+    // '.segment-efforts'                  // Another possible container
   ];
   
   let segmentsTable = null;
@@ -140,7 +140,7 @@ function extractSegmentData() {
       // Extract time - try multiple possible selectors
       let timeElement = row.querySelector('.time');
       if (!timeElement) timeElement = row.querySelector('.segment-time');
-      if (!timeElement) timeElement = row.querySelector('[data-testid="segment-time"]');
+      if (!timeElement) timeElement = row.querySelector('.time-col');
       if (!timeElement) {
         // Try to find time in any cell that contains time format (mm:ss)
         const cells = row.querySelectorAll('td');

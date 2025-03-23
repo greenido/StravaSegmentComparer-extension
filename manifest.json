@@ -4,15 +4,13 @@
   "version": "1.0",
   "description": "Compare segments between two Strava activities",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": [
-    "https://www.strava.com/*"
-  ],
+  "host_permissions": ["https://www.strava.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon16.svg",
-      "48": "icons/icon48.svg",
-      "128": "icons/icon128.svg"
+      "16": "icons/run-16.png",
+      "48": "icons/run-48.png",
+      "128": "icons/run-128.png"
     }
   },
   "background": {
@@ -31,9 +29,9 @@
     }
   ],
   "icons": {
-    "16": "icons/icon16.svg",
-    "48": "icons/icon48.svg",
-    "128": "icons/icon128.svg"
+    "16": "icons/run-16.png",
+    "48": "icons/run-48.png",
+    "128": "icons/run-128.png"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

@@ -19,8 +19,9 @@ function parseTimeToSeconds(timeStr) {
     // Format: mm:ss
     return parts[0] * 60 + parts[1];
   } else if (parts.length === 1) {
-    // Format: ss
-    return parts[0];
+    // Format: ss or ss's'
+    const seconds = parts[0];
+    return seconds.toString().endsWith('s') ? parseInt(seconds.slice(0, -1), 10) : seconds;
   }
   
   return 0;
