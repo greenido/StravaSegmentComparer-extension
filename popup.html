@@ -1,100 +1,166 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Strava Segment Comparator</title>
-  <link rel="stylesheet" href="tailwind.output.css">
-  <!-- Simple-DataTables CSS -->
-  <link href="lib/simple-datatables.css" rel="stylesheet" type="text/css">
-  <style>
-    body {
-      min-width: 750px;
-      max-width: 800px;
-      overflow-x: hidden;
-    }
-  </style>
-</head>
-<body class="bg-gray-100 py-4">
-  <div class="max-w-4xl mx-auto px-4 overflow-y-auto max-h-[570px]">
-    <h1 class="text-lg font-bold text-strava mb-4 flex items-center">
-      <img src="icons/run-128-logo.png" alt="Info" class="h-5 w-5 text-blue-500 mr-1" style="padding-right: 2em;">
-      Strava Segment Comparator
-    </h1>
-    
-    <div class="card mb-4">
-      <div class="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <label for="activity1" class="block text-sm font-bold mb-2 text-gray-700">Activity 1 URL:</label>
-          <input type="url" id="activity1" placeholder="https://www.strava.com/activities/..." required 
-                 class="input-field">
-        </div>
-        
-        <div>
-          <label for="activity2" class="block text-sm font-bold mb-2 text-gray-700">Activity 2 URL:</label>
-          <input type="url" id="activity2" placeholder="https://www.strava.com/activities/..." required 
-                 class="input-field">
-        </div>
-      </div>
-      
-      <div class="flex justify-center">
-        <button id="compareBtn" class="btn">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-          </svg>
-          Compare Activities
-        </button>
-      </div>
-    </div>
-    
-    <div id="status" class="status-message hidden"></div>
-    
-    <div id="results" class="card hidden">
-      <div class="flex justify-between items-center mb-3">
-        <div class="flex-1 mr-3">
-          <input type="text" id="tableSearch" placeholder="Filter segments..." class="input-field">
-        </div>
-        <div>
-          <button id="exportBtn" title="Export data as CSV file" class="btn text-xs py-1 px-3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export CSV
-          </button>
-        </div>
-      </div>
-      
-      <div class="overflow-x-auto">
-        <table id="segmentsTable" class="w-full text-sm">
-          <thead>
-            <tr>
-              <th class="col-segment">Segment Name</th>
-              <th class="col-time">Time 1</th>
-              <th class="col-time">Time 2</th>
-              <th class="col-diff">Time Diff</th>
-              <th class="col-speed">Speed 1</th>
-              <th class="col-speed">Speed 2</th>
-              <th class="col-diff">Speed Diff</th>
-            </tr>
-          </thead>
-          <tbody id="segmentsTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-    
-    <!-- Log container -->
-    <div id="logContainer" class="log-container">
-      <div class="log-header">
-        <img src="icons/info-128.png" alt="Info" class="h-5 w-5 text-blue-500 mr-1">
-        Activity Logs
-      </div>
-      <div id="logContent" class="log-content"></div>
-    </div>
-  </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strava Segment Comparator</title>
+    <link rel="stylesheet" href="tailwind.output.css" />
+    <!-- Simple-DataTables CSS -->
+    <link href="lib/simple-datatables.css" rel="stylesheet" type="text/css" />
+    <style>
+      body {
+        min-width: 750px;
+        max-width: 800px;
+        overflow-x: hidden;
+      }
+      details {
+        margin-top: 1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        background-color: #f9fafb;
+        padding: 0.5rem;
+      }
+      summary {
+        font-weight: bold;
+        cursor: pointer;
+        padding: 0.5rem;
+        background-color: #fc4c02;
+        color: white;
+        border-radius: 0.5rem;
+      }
+      summary:hover {
+        background-color: #e34500;
+      }
+      .log-content {
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 py-4">
+    <div class="max-w-4xl mx-auto px-4 overflow-y-auto max-h-[570px]">
+      <h1 class="text-lg font-bold text-strava mb-4 flex items-center">
+        <img
+          src="icons/run-128-logo.png"
+          alt="Info"
+          class="h-5 w-5 text-blue-500 mr-1"
+          style="padding-right: 2em"
+        />
+        Strava Segment Comparator
+      </h1>
 
-  <!-- Simple-DataTables JS -->
-  <script src="lib/simple-datatables.js"></script>
-  <script src="utils.js"></script>
-  <script src="popup.js"></script>
-</body>
+      <div class="max-w-[700px] mx-auto">
+        <div class="card mb-4 p-6 rounded-lg shadow-md flex flex-col w-full h-full">
+          <div class="flex-1 min-h-0 space-y-4">
+            <div>
+              <label for="activity1" class="block text-sm font-bold mb-2 text-gray-700">Activity 1 URL:</label>
+              <input
+                type="url"
+                id="activity1"
+                placeholder="https://www.strava.com/activities/..."
+                required
+                class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2"
+              />
+            </div>
+            
+            <div>
+              <label for="activity2" class="block text-sm font-bold mb-2 text-gray-700">Activity 2 URL:</label>
+              <input
+                type="url"
+                id="activity2"
+                placeholder="https://www.strava.com/activities/..."
+                required
+                class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2"
+              />
+            </div>
+          </div>
+        </div>
+      
+        <!-- Compare button below the card, full width -->
+        <div class="card mt-4 p-6 rounded-lg shadow-md" style="height: 48px;">
+            <button id="compareBtn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-sm mx-auto block" style="width: 450px;">
+            <img
+              src="icons/run-128.png"
+              alt="Compare"
+              class="h-5 w-5 text-white inline-block mr-2"
+            />      
+            Compare Activities
+            </button>
+        </div>
+      </div>
+      
+      
+
+      <div id="status" class="status-message hidden"></div>
+
+      <div id="results" class="card hidden">
+        <div class="flex justify-between items-center mb-3">
+          <div class="flex-1 mr-3">
+            <input
+              type="text"
+              id="tableSearch"
+              placeholder="Filter segments..."
+              class="input-field"
+            />
+          </div>
+          <div>
+            <button
+              id="exportBtn"
+              title="Export data as CSV file"
+              class="btn text-xs py-1 px-3"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-3 w-3 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table id="segmentsTable" class="w-full text-sm">
+            <thead>
+              <tr>
+                <th class="col-segment">Segment Name</th>
+                <th class="col-time">Time 1</th>
+                <th class="col-time">Time 2</th>
+                <th class="col-diff">Time Diff</th>
+                <th class="col-speed">Speed 1</th>
+                <th class="col-speed">Speed 2</th>
+                <th class="col-diff">Speed Diff</th>
+              </tr>
+            </thead>
+            <tbody id="segmentsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Log container -->
+      <details id="logContainer">
+        <summary>Activity Logs</summary>
+        <div id="logContent" class="log-content">
+          <!-- Log content goes here -->
+        </div>
+      </details>
+    </div>
+
+    <!-- Simple-DataTables JS -->
+    <script src="lib/simple-datatables.js"></script>
+    <script src="utils.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>
