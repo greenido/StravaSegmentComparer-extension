@@ -24,10 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
   exportBtn.addEventListener('click', exportAsCSV);
   clearBtn.addEventListener('click', () => {
     localStorage.removeItem('comparisonResults');
+    location.reload();
     addLogEntry('Cleared saved results from localStorage', 'info');
-    resultsDiv.classList.add('hidden');
-    const tableBody = document.getElementById('segmentsTableBody');
-    tableBody.innerHTML = ''; // Clear the table
+    // resultsDiv.classList.add('hidden');
+    // const tableBody = document.getElementById('segmentsTableBody');
+    // tableBody.innerHTML = ''; // Clear the table
     showStatus('Results cleared successfully', 'success');
   });
 
@@ -253,6 +254,7 @@ function displayResults(data) {
   // Clear existing table
   tableBody.innerHTML = '';
   addLogEntry('Cleared previous table data', 'info');
+  
 
   // Add rows to table
   addLogEntry(`Adding ${data.length} rows to table`, 'info');
