@@ -192,6 +192,7 @@ function compareSegmentData(activity1Data, activity2Data) {
       // Add to results
       results.push({
         name: segment1.name,
+        link: segment1.link,
         time_1: segment1.time,
         time_2: segment2.time,
         time_diff: formatTimeDiff(timeDiffSeconds),
@@ -242,7 +243,11 @@ function displayResults(data) {
     
     // Add cells for each data point
     tr.innerHTML = `
-      <td>${row.name}</td>
+      <td>
+       <a href="${row.link}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">
+          ${row.name}
+        </a>
+      </td>
       <td>${row.time_1}</td>
       <td>${row.time_2}</td>
       <td class="${getTimeDiffClass(row.time_diff)}">${row.time_diff}</td>

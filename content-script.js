@@ -120,23 +120,29 @@ function extractSegmentData() {
   segmentRows.forEach((row, index) => {
     try {
       // Log the current row for debugging
-      console.log(`Processing segment row #${index+1}:`, row.outerHTML);
-      
+      console.log(`Processing segment row #${index + 1}:`, row.outerHTML);
+
+      // Extract the segment effort ID
+      const segmentEffortId = row.getAttribute('data-segment-effort-id');
+      if (!segmentEffortId) {
+        console.warn(`Segment #${index + 1}: Effort ID not found, skipping this segment`);
+        skippedSegments++;
+        return;
+      }
+
+      // Build the segment link
+      const activityId = activityData.activityId;
+      const segmentLink = `https://www.strava.com/activities/${activityId}/segments/${segmentEffortId}`;
+
       // Extract segment name - try multiple possible selectors
       let nameElement = row.querySelector('.name');
       if (!nameElement) nameElement = row.querySelector('.segment-name');
       if (!nameElement) nameElement = row.querySelector('[data-testid="segment-name"]');
       if (!nameElement) nameElement = row.querySelector('a');
-      
-      if (!nameElement) {
-        console.warn(`Segment #${index+1}: Name element not found, skipping this segment`);
-        skippedSegments++;
-        return;
-      }
-      
-      const name = nameElement.textContent.trim();
+
+      const name = nameElement ? nameElement.textContent.trim() : `Segment ${index + 1}`;
       console.log(`Found segment name: "${name}"`);
-      
+
       // Extract time - try multiple possible selectors
       let timeElement = row.querySelector('.time');
       if (!timeElement) timeElement = row.querySelector('.segment-time');
@@ -151,10 +157,10 @@ function extractSegmentData() {
           }
         }
       }
-      
+
       const time = timeElement ? timeElement.textContent.trim() : 'N/A';
       console.log(`Found segment time: "${time}"`);
-      
+
       // Extract speed - try multiple possible selectors
       let speedElement = row.querySelector('.speeds .text-nowrap');
       if (!speedElement) speedElement = row.querySelector('.speed');
@@ -169,30 +175,31 @@ function extractSegmentData() {
           }
         }
       }
-      
+
       const speed = speedElement ? speedElement.textContent.trim() : 'N/A';
       console.log(`Found segment speed: "${speed}"`);
-      
+
       // Additional data if available
       const distanceElement = row.querySelector('.distance');
       const distance = distanceElement ? distanceElement.textContent.trim() : null;
-      
+
       const powerElement = row.querySelector('.power');
       const power = powerElement ? powerElement.textContent.trim() : null;
-      
+
       // Add to segments array
       activityData.segments.push({
         name,
+        link: segmentLink,
         time,
         speed,
         distance,
         power,
         index: index + 1
       });
-      
+
       successfulSegments++;
     } catch (error) {
-      console.error(`Error processing segment #${index+1}:`, error);
+      console.error(`Error processing segment #${index + 1}:`, error);
       skippedSegments++;
     }
   });
