@@ -51,18 +51,23 @@
     
     <div id="results" class="card hidden">
       <div class="flex justify-between items-center mb-3">
-        <div class="flex-1 mr-3">
+        <!-- <div class="flex-1 mr-3">
           <input type="text" id="tableSearch" placeholder="Filter segments..." class="input-field">
-        </div>
-        <div>
-          <button id="exportBtn" title="Export data as CSV file" class="btn text-xs py-1 px-3">
+        </div> -->
+    
+            <button id="exportBtn" title="Export data as CSV file" class="btn text-xs py-1 px-3" style="padding-right: 1em;">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Export CSV
+            </button>
+
+          <button id="clearBtn" class="btn text-xs py-1 px-3 bg-red-500 hover:bg-red-600 text-white">
+            Clear Results
           </button>
+          
         </div>
-      </div>
+   
       
       <div class="overflow-x-auto">
         <table id="segmentsTable" class="w-full text-sm">
@@ -90,6 +95,7 @@
       </div>
       <div id="logContent" class="log-content"></div>
     </div>
+
   </div>
 
   <!-- Simple-DataTables JS -->
