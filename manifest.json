@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Strava Segment Comparator",
-  "version": "1.0",
+  "version": "2.0",
   "description": "Compare segments between two Strava activities",
   "permissions": ["activeTab", "storage"],
   "host_permissions": ["https://www.strava.com/*"],

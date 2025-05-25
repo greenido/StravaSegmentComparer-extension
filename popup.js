@@ -251,10 +251,40 @@ function displayResults(data) {
   addLogEntry('Setting up results table...', 'info');
   const tableBody = document.getElementById('segmentsTableBody');
 
+  // Check if the table body exists
+  if (!tableBody) {
+    console.error('Error: Table body element with ID "segmentsTableBody" not found.');
+    // Create a new table element
+    const newTable = document.createElement('table');
+    newTable.id = 'segmentsTable';
+    newTable.className = 'w-full text-sm';
+
+    // Add table header
+    newTable.innerHTML = `
+      <thead>
+      <tr>
+        <th class="col-segment">Segment Name</th>
+        <th class="col-time">Time 1</th>
+        <th class="col-time">Time 2</th>
+        <th class="col-diff">Time Diff</th>
+        <th class="col-speed">Speed 1</th>
+        <th class="col-speed">Speed 2</th>
+        <th class="col-diff">Speed Diff</th>
+      </tr>
+      </thead>
+      <tbody id="segmentsTableBody"></tbody>
+    `;
+
+    // Append the new table to the resultsDiv
+    resultsDiv.appendChild(newTable);
+
+    // Add a log entry for creating the table
+    addLogEntry('Created a new results table and added it to the page', 'info');
+  }
+
   // Clear existing table
   tableBody.innerHTML = '';
   addLogEntry('Cleared previous table data', 'info');
-  
 
   // Add rows to table
   addLogEntry(`Adding ${data.length} rows to table`, 'info');
@@ -270,10 +300,10 @@ function displayResults(data) {
       </td>
       <td>${row.time_1}</td>
       <td>${row.time_2}</td>
-      <td class="${getTimeDiffClass(row.time_diff)}">${row.time_diff}</td>
+      <td style="${getTimeDiffStyle(row.time_diff)}">${row.time_diff}</td>
       <td>${row.speed_1}</td>
       <td>${row.speed_2}</td>
-      <td class="${getSpeedDiffClass(row.speed_diff)}">${row.speed_diff}</td>
+      <td style="${getSpeedDiffStyle(row.speed_diff)}">${row.speed_diff}</td>
     `;
 
     tableBody.appendChild(tr);
@@ -282,31 +312,6 @@ function displayResults(data) {
   // Save results to localStorage
   localStorage.setItem('comparisonResults', JSON.stringify(data));
   addLogEntry('Saved results to localStorage', 'info');
-
-  // Initialize or refresh DataTable
-  if (dataTable) {
-    addLogEntry('Refreshing existing DataTable instance', 'info');
-    dataTable.destroy();
-  }
-
-  addLogEntry('Initializing sortable/filterable table', 'info');
-  // The library might expose itself as either simpleDatatables or SimpleDatatables
-  const DataTableConstructor = window.simpleDatatables?.DataTable || 
-                               window.SimpleDatatables?.DataTable || 
-                               window.DataTable;
-
-  if (!DataTableConstructor) {
-    addLogEntry('Error: DataTable library not properly loaded', 'error');
-    return;
-  }
-
-  dataTable = new DataTableConstructor("#segmentsTable", {
-    searchable: true,
-    fixedHeight: false,
-    perPage: 50
-  });
-
-  addLogEntry('Table setup complete', 'success');
 }
 
 // Export data as CSV
@@ -434,6 +439,22 @@ function getSpeedDiffClass(speedDiff) {
   if (value > 0) return 'negative-diff';
   if (value < 0) return 'positive-diff';
   return '';
+}
+
+// Get CSS class and inline style for time difference
+function getTimeDiffStyle(timeDiff) {
+  const diffValue = parseFloat(timeDiff.replace(/[^\d.-]/g, '')); // Extract numeric value
+  const intensity = Math.min(255, Math.abs(diffValue) * 10); // Scale intensity (max 255)
+  const color = timeDiff.startsWith('+') ? `rgba(220, 38, 38, ${intensity / 255})` : `rgba(34, 197, 94, ${intensity / 255})`; // Red for positive, green for negative
+  return `background-color: ${color};`;
+}
+
+// Get CSS class and inline style for speed difference
+function getSpeedDiffStyle(speedDiff) {
+  const diffValue = parseFloat(speedDiff.replace(/[^\d.-]/g, '')); // Extract numeric value
+  const intensity = Math.min(255, Math.abs(diffValue) * 10); // Scale intensity (max 255)
+  const color = diffValue > 0 ? `rgba(220, 38, 38, ${intensity / 255})` : `rgba(34, 197, 94, ${intensity / 255})`; // Red for positive, green for negative
+  return `background-color: ${color};`;
 }
 
 
