@@ -11,6 +11,9 @@ const resultsDiv = document.getElementById('results');
 const exportBtn = document.getElementById('exportBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn'); // Add a Clear button in your HTML
+const autoDetectBtn = document.getElementById('autoDetectBtn');
+const helpBtn = document.getElementById('helpBtn');
+const helpSection = document.getElementById('helpSection');
 
 // Log entries array to track all messages
 let logEntries = [];
@@ -22,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Set up event listeners
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
+  autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
+  helpBtn.addEventListener('click', toggleHelpSection);
   clearBtn.addEventListener('click', () => {
     localStorage.removeItem('comparisonResults');
     location.reload();
@@ -32,18 +37,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showStatus('Results cleared successfully', 'success');
   });
 
-  // Check if we're on a Strava activity page and pre-fill the first input
-  chrome.tabs.query({active: true, currentWindow: true}, tabs => {
-    const url = tabs[0].url;
-    if (url && url.match(/https:\/\/www\.strava\.com\/activities\/\d+/)) {
-      activity1Input.value = url;
-    }
-  });
-
-  // Load any previously saved URLs
+  // Load any previously saved URLs first (as fallback)
   chrome.storage.local.get(['activity1', 'activity2'], data => {
     if (data.activity1) activity1Input.value = data.activity1;
     if (data.activity2) activity2Input.value = data.activity2;
+    
+    // Then try to auto-detect and populate from open tabs (this will override saved URLs if found)
+    autoPopulateActivityUrls();
   });
 
   // Load saved results from localStorage on popup load
@@ -55,6 +55,91 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsDiv.classList.remove('hidden');
   }
 });
+
+// Auto-populate activity URLs from open Strava activity tabs
+async function autoPopulateActivityUrls() {
+  try {
+    addLogEntry('Searching for open Strava activity tabs...', 'info');
+    showStatus('Scanning open tabs for Strava activities...', 'loading');
+    
+    // Query all tabs to find Strava activity pages
+    const tabs = await chrome.tabs.query({});
+    const stravaActivityTabs = tabs.filter(tab => 
+      tab.url && tab.url.match(/https:\/\/www\.strava\.com\/activities\/\d+/)
+    );
+    
+    // Sort tabs by tab ID to get a consistent order (oldest tabs first)
+    stravaActivityTabs.sort((a, b) => a.id - b.id);
+    
+    addLogEntry(`Found ${stravaActivityTabs.length} open Strava activity tabs`, 'info');
+    
+    // Log details about found tabs
+    stravaActivityTabs.forEach((tab, index) => {
+      const activityId = extractActivityId(tab.url);
+      addLogEntry(`Tab ${index + 1}: Activity ${activityId} (Tab ID: ${tab.id})`, 'info');
+    });
+    
+    // Clear existing values first
+    activity1Input.value = '';
+    activity2Input.value = '';
+    
+    if (stravaActivityTabs.length >= 1) {
+      activity1Input.value = stravaActivityTabs[0].url;
+      addLogEntry(`Auto-populated Activity 1: ${extractActivityId(stravaActivityTabs[0].url)}`, 'success');
+    }
+    
+    if (stravaActivityTabs.length >= 2) {
+      activity2Input.value = stravaActivityTabs[1].url;
+      addLogEntry(`Auto-populated Activity 2: ${extractActivityId(stravaActivityTabs[1].url)}`, 'success');
+    }
+    
+    // Provide detailed feedback based on what was found
+    if (stravaActivityTabs.length >= 2) {
+      showStatus(`✅ Auto-detected 2 Strava activities - ready to compare!`, 'success');
+    } else if (stravaActivityTabs.length === 1) {
+      showStatus(`⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually`, 'info');
+    } else {
+      showStatus(`❌ No open Strava activity tabs found - please navigate to Strava activities first`, 'error');
+    }
+    
+    // Save the auto-populated URLs to storage
+    if (stravaActivityTabs.length >= 1) {
+      const storageData = {};
+      if (stravaActivityTabs.length >= 1) storageData.activity1 = stravaActivityTabs[0].url;
+      if (stravaActivityTabs.length >= 2) storageData.activity2 = stravaActivityTabs[1].url;
+      
+      chrome.storage.local.set(storageData);
+      addLogEntry('Saved auto-detected URLs to storage', 'info');
+    }
+    
+    // If more than 2 tabs found, inform user
+    if (stravaActivityTabs.length > 2) {
+      addLogEntry(`Note: Found ${stravaActivityTabs.length} Strava activity tabs, using the first 2`, 'info');
+    }
+    
+  } catch (error) {
+    addLogEntry(`Error auto-detecting Strava tabs: ${error.message}`, 'error');
+    showStatus(`Error scanning tabs: ${error.message}`, 'error');
+    console.error('Error in autoPopulateActivityUrls:', error);
+  }
+}
+
+// Toggle help section visibility
+function toggleHelpSection() {
+  const isHidden = helpSection.classList.contains('hidden');
+  
+  if (isHidden) {
+    helpSection.classList.remove('hidden');
+    helpBtn.classList.add('active');
+    helpBtn.title = 'Hide help and tips';
+    addLogEntry('Help section opened', 'info');
+  } else {
+    helpSection.classList.add('hidden');
+    helpBtn.classList.remove('active');
+    helpBtn.title = 'Show help and tips';
+    addLogEntry('Help section closed', 'info');
+  }
+}
 
 // Extract activity ID from Strava URL
 function extractActivityId(url) {

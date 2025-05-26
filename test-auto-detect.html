@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Auto-Detection Feature</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .step {
+            background: #f5f5f5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #fc4c02;
+        }
+        .code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ffeaa7;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚴‍♂️ Strava Segment Comparator - Auto-Detection Test</h1>
+    
+    <div class="highlight">
+        <strong>New Feature:</strong> The extension now automatically detects open Strava activity tabs and populates the input fields!
+    </div>
+
+    <h2>How to Test the Auto-Detection Feature</h2>
+    
+    <div class="step">
+        <h3>Step 1: Open Strava Activity Pages</h3>
+        <p>Open these example Strava activities in separate tabs:</p>
+        <ul>
+            <li><a href="https://www.strava.com/activities/1234567890" target="_blank">Example Activity 1</a></li>
+            <li><a href="https://www.strava.com/activities/0987654321" target="_blank">Example Activity 2</a></li>
+        </ul>
+        <p><em>Note: These are example URLs. Use real Strava activity URLs for actual testing.</em></p>
+    </div>
+
+    <div class="step">
+        <h3>Step 2: Load the Extension</h3>
+        <p>Make sure the extension is loaded in Chrome:</p>
+        <ol>
+            <li>Go to <span class="code">chrome://extensions/</span></li>
+            <li>Enable "Developer mode"</li>
+            <li>Click "Load unpacked" and select the extension folder</li>
+        </ol>
+    </div>
+
+    <div class="step">
+        <h3>Step 3: Test Auto-Detection</h3>
+        <p>Click the extension icon in your browser toolbar and observe:</p>
+        <ul>
+            <li>The extension should automatically scan for open Strava activity tabs</li>
+            <li>If 2+ tabs are found, both input fields should be populated</li>
+            <li>If 1 tab is found, only the first field should be populated</li>
+            <li>If no tabs are found, you'll see a message to open Strava activities</li>
+            <li>Check the activity logs for detailed information about the detection process</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3>Step 4: Manual Re-Detection</h3>
+        <p>You can also manually trigger the auto-detection:</p>
+        <ul>
+            <li>Click the "Auto-Detect" button in the extension popup</li>
+            <li>This will re-scan all open tabs and update the input fields</li>
+            <li>Useful if you open new Strava activity tabs after opening the extension</li>
+        </ul>
+    </div>
+
+    <h2>What's New</h2>
+    <ul>
+        <li>✅ Added "tabs" permission to manifest.json</li>
+        <li>✅ Created <span class="code">autoPopulateActivityUrls()</span> function</li>
+        <li>✅ Added "Auto-Detect" button to the popup</li>
+        <li>✅ Automatic detection runs when the popup opens</li>
+        <li>✅ Detailed logging of the detection process</li>
+        <li>✅ Fallback to saved URLs if no tabs are detected</li>
+        <li>✅ Visual feedback with status messages and emojis</li>
+    </ul>
+
+    <h2>Technical Details</h2>
+    <p>The auto-detection feature works by:</p>
+    <ol>
+        <li>Using <span class="code">chrome.tabs.query({})</span> to get all open tabs</li>
+        <li>Filtering tabs that match the Strava activity URL pattern</li>
+        <li>Sorting tabs by ID to ensure consistent ordering</li>
+        <li>Populating the first two activity URLs found</li>
+        <li>Saving the detected URLs to Chrome storage</li>
+    </ol>
+
+    <div class="highlight">
+        <strong>Privacy Note:</strong> The extension only accesses tab URLs to detect Strava activities. No data is sent to external servers.
+    </div>
+</body>
+</html> 

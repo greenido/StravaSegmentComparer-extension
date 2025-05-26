@@ -6,11 +6,13 @@ If you have any questions or issues, please open an issue on GitHub.
 
 ## Features
 
-- Input URLs for two Strava activities
+- **Auto-detect open Strava activity tabs** - Automatically populate URLs from the first two open Strava activity pages
+- Input URLs for two Strava activities manually if needed
 - Compare segments between the two activities
 - Filter segments by name
 - Export comparison data as a CSV file
-- View activity logs
+- View detailed activity logs
+- Save and restore previous comparisons
 
 ## Installation
 
@@ -29,10 +31,18 @@ If you have any questions or issues, please open an issue on GitHub.
 
 ## Usage
 
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable "Developer mode" using the toggle in the top right corner.
-3. Click "Load unpacked" and select the project directory.
-4. The extension should now appear in your list of extensions.
+### Quick Start (Auto-Detection)
+1. Open 2 Strava activity pages in separate browser tabs
+2. Click the extension icon in your browser toolbar
+3. Click the "Auto-Detect" button to automatically populate both activity URLs
+4. Click "Compare Activities" to see the segment comparison
+
+### Manual Usage
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable "Developer mode" using the toggle in the top right corner
+3. Click "Load unpacked" and select the project directory
+4. The extension should now appear in your list of extensions
+5. Navigate to Strava activity pages and manually enter URLs in the extension popup
 
 ## Development
 
