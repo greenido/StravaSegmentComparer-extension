@@ -19,14 +19,45 @@ const helpSection = document.getElementById('helpSection');
 let logEntries = [];
 
 // Global variables
+let athlete1Name = null;
+let athlete2Name = null;
 
+function getDisplayName(index) {
+  const name = index === 1 ? athlete1Name : athlete2Name;
+  return name && name.trim() ? name.trim() : `Activity ${index}`;
+}
+
+function updateTableHeaders() {
+  const table = document.getElementById('segmentsTable');
+  if (!table) return;
+  const timeHeaders = table.querySelectorAll('thead th.col-time');
+  const speedHeaders = table.querySelectorAll('thead th.col-speed');
+  if (timeHeaders.length >= 2) {
+    timeHeaders[0].textContent = `Time (${getDisplayName(1)})`;
+    timeHeaders[1].textContent = `Time (${getDisplayName(2)})`;
+  }
+  if (speedHeaders.length >= 2) {
+    speedHeaders[0].textContent = `Speed (${getDisplayName(1)})`;
+    speedHeaders[1].textContent = `Speed (${getDisplayName(2)})`;
+  }
+}
 // Initialize popup
 document.addEventListener('DOMContentLoaded', () => {
   // Set up event listeners
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
-  helpBtn.addEventListener('click', toggleHelpSection);
+  helpBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    toggleHelpSection();
+  });
+  // Keyboard accessibility: toggle with Enter/Space
+  helpBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleHelpSection();
+    }
+  });
   clearBtn.addEventListener('click', () => {
     localStorage.removeItem('comparisonResults');
     location.reload();
@@ -38,9 +69,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load any previously saved URLs first (as fallback)
-  chrome.storage.local.get(['activity1', 'activity2'], data => {
+  chrome.storage.local.get(['activity1', 'activity2', 'athlete1Name', 'athlete2Name'], data => {
     if (data.activity1) activity1Input.value = data.activity1;
     if (data.activity2) activity2Input.value = data.activity2;
+    if (data.athlete1Name) athlete1Name = data.athlete1Name;
+    if (data.athlete2Name) athlete2Name = data.athlete2Name;
+    if (data.athlete1Name || data.athlete2Name) {
+      addLogEntry(`Loaded athlete names from storage: ${getDisplayName(1)} vs ${getDisplayName(2)}`, 'info');
+      updateTableHeaders();
+    }
     
     // Then try to auto-detect and populate from open tabs (this will override saved URLs if found)
     autoPopulateActivityUrls();
@@ -132,11 +169,13 @@ function toggleHelpSection() {
     helpSection.classList.remove('hidden');
     helpBtn.classList.add('active');
     helpBtn.title = 'Hide help and tips';
+    helpBtn.setAttribute('aria-expanded', 'true');
     addLogEntry('Help section opened', 'info');
   } else {
     helpSection.classList.add('hidden');
     helpBtn.classList.remove('active');
     helpBtn.title = 'Show help and tips';
+    helpBtn.setAttribute('aria-expanded', 'false');
     addLogEntry('Help section closed', 'info');
   }
 }
@@ -183,6 +222,12 @@ async function compareActivities() {
       fetchActivityData(activity2Id)
     ]);
 
+    // Capture athlete names for header labels
+    athlete1Name = activity1Data.athleteName || `Activity ${activity1Id}`;
+    athlete2Name = activity2Data.athleteName || `Activity ${activity2Id}`;
+    chrome.storage.local.set({ athlete1Name, athlete2Name });
+    addLogEntry(`Comparing ${athlete1Name} vs ${athlete2Name}`, 'info');
+
     addLogEntry(`Activity #1: Found ${activity1Data.segments.length} segments`, 'success');
     addLogEntry(`Activity #2: Found ${activity2Data.segments.length} segments`, 'success');
 
@@ -193,6 +238,10 @@ async function compareActivities() {
     // Display results
     addLogEntry(`Displaying ${comparisonData.length} matched segments in table`, 'info');
     displayResults(comparisonData);
+    // Display activity stats comparison panels (side-by-side, not a table)
+    addLogEntry('Building activity stats panels...', 'info');
+    displayStatsComparison(activity1Data, activity2Data);
+    updateTableHeaders();
 
     // Show success status
     showStatus(`Successfully compared ${comparisonData.length} segments`, 'success');
@@ -324,9 +373,17 @@ function compareSegmentData(activity1Data, activity2Data) {
     addLogEntry(`${unmatchedCount} segments from Activity 1 were not found in Activity 2`, 'warning');
   }
 
-  // Sort results by segment name
-  const sortedResults = results.sort((a, b) => a.name.localeCompare(b.name));
-  addLogEntry(`Sorting ${sortedResults.length} segments alphabetically`, 'info');
+  // Preserve Strava page order based on Activity 1 segment order
+  const sortedResults = results
+    .map(r => {
+      // Attach order index from activity 1 if available; default large number to push unknowns last
+      const activity1Segment = activity1Data.segments.find(s => s.name === r.name);
+      return { ...r, orderIndex: activity1Segment && typeof activity1Segment.index === 'number' ? activity1Segment.index : Number.MAX_SAFE_INTEGER };
+    })
+    .sort((a, b) => a.orderIndex - b.orderIndex)
+    .map(({ orderIndex, ...rest }) => rest);
+
+  addLogEntry(`Ordering ${sortedResults.length} segments to match Strava page order`, 'info');
 
   return sortedResults;
 }
@@ -399,6 +456,180 @@ function displayResults(data) {
   addLogEntry('Saved results to localStorage', 'info');
 }
 
+// Display activity-level stats side-by-side (no tables)
+function displayStatsComparison(activity1Data, activity2Data) {
+  const resultsContainer = document.getElementById('results');
+  if (!resultsContainer) return;
+
+  // Remove existing stats section if present
+  const existingSection = document.getElementById('activityStatsSection');
+  if (existingSection) existingSection.remove();
+
+  const statsSection = document.createElement('div');
+  statsSection.id = 'activityStatsSection';
+  statsSection.className = 'mb-4';
+
+  // Build label->value maps and ordered union of labels for alignment
+  const rawPairs1 = activity1Data.activityStats || [];
+  const rawPairs2 = activity2Data.activityStats || [];
+
+  const normalizeForKey = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const cleanStatText = (s) => {
+    let out = (s || '').replace(/\s+/g, ' ').trim();
+    // Remove common toggle/expand cues
+    out = out.replace(/\bshow\s*more\b/ig, '').replace(/\bshow\s*less\b/ig, '').replace(/…/g, '');
+    // Remove trailing separators like "|" if any
+    out = out.replace(/\s*[|]\s*$/, '');
+    return out.trim();
+  };
+
+  // Map of normalized label -> { label, value }
+  const map1 = new Map();
+  const map2 = new Map();
+  rawPairs1.forEach(({ label, value }) => {
+    const k = normalizeForKey(label);
+    if (!k) return;
+    if (!map1.has(k)) map1.set(k, { label: cleanStatText(label), value: cleanStatText(value) });
+  });
+  rawPairs2.forEach(({ label, value }) => {
+    const k = normalizeForKey(label);
+    if (!k) return;
+    if (!map2.has(k)) map2.set(k, { label: cleanStatText(label), value: cleanStatText(value) });
+  });
+
+  // Ordered union: start with activity1 order, then add missing from activity2 order
+  const orderedLabels = [];
+  const seen = new Set();
+  rawPairs1.forEach(({ label }) => {
+    const k = normalizeForKey(label);
+    if (k && !seen.has(k)) { seen.add(k); orderedLabels.push(k); }
+  });
+  rawPairs2.forEach(({ label }) => {
+    const k = normalizeForKey(label);
+    if (k && !seen.has(k)) { seen.add(k); orderedLabels.push(k); }
+  });
+
+  // Wrapper: grid with two synced columns
+  const wrapper = document.createElement('div');
+  wrapper.className = 'grid grid-cols-1 md:grid-cols-2 gap-4';
+
+  function buildAlignedColumn(title, isLeft) {
+    const col = document.createElement('div');
+    col.className = 'card';
+    const header = document.createElement('div');
+    header.className = 'flex items-center justify-between mb-2';
+    header.innerHTML = `<h3 class=\"text-sm font-bold text-gray-700\">${title}</h3>`;
+    col.appendChild(header);
+
+    // Build a table for stats
+    const table = document.createElement('table');
+    table.className = 'w-full text-sm';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const thLabel = document.createElement('th');
+    thLabel.className = 'text-left text-xs font-semibold text-gray-600';
+    thLabel.textContent = 'Metric';
+    const thValue = document.createElement('th');
+    thValue.className = 'text-right text-xs font-semibold text-gray-600';
+    thValue.textContent = 'Value';
+    headerRow.appendChild(thLabel);
+    headerRow.appendChild(thValue);
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
+    orderedLabels.forEach((k) => {
+      const pair = (isLeft ? map1 : map2).get(k);
+      if (!pair) return;
+      const displayLabel = cleanStatText(pair.label);
+      const displayValue = cleanStatText(pair.value);
+
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-gray-100';
+
+      const tdLabel = document.createElement('td');
+      tdLabel.className = 'py-1.5 pr-3 text-[11px] uppercase tracking-wide text-gray-500 align-baseline';
+      tdLabel.textContent = displayLabel;
+
+      const tdValue = document.createElement('td');
+      tdValue.className = 'py-1.5 pl-3 text-sm md:text-base font-semibold text-gray-900 text-right align-baseline';
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'bg-yellow-100 rounded px-1 inline-block';
+      valueSpan.style.backgroundColor = '#FEF3C7';
+      valueSpan.textContent = displayValue;
+      tdValue.appendChild(valueSpan);
+
+      tr.appendChild(tdLabel);
+      tr.appendChild(tdValue);
+      tbody.appendChild(tr);
+    });
+
+    if (tbody.children.length === 0) {
+      const trEmpty = document.createElement('tr');
+      const tdEmpty = document.createElement('td');
+      tdEmpty.colSpan = 2;
+      tdEmpty.className = 'py-2 text-xs text-gray-500 text-center';
+      tdEmpty.textContent = 'No activity stats found';
+      trEmpty.appendChild(tdEmpty);
+      tbody.appendChild(trEmpty);
+    }
+
+    table.appendChild(tbody);
+    col.appendChild(table);
+    return col;
+  }
+
+  const col1 = buildAlignedColumn(getDisplayName(1), true);
+  const col2 = buildAlignedColumn(getDisplayName(2), false);
+
+  wrapper.appendChild(col1);
+  wrapper.appendChild(col2);
+  statsSection.appendChild(wrapper);
+
+  const segmentsTable = document.getElementById('segmentsTable');
+  if (segmentsTable && segmentsTable.parentElement) {
+    segmentsTable.parentElement.insertAdjacentElement('afterend', statsSection);
+  } else {
+    resultsContainer.appendChild(statsSection);
+  }
+}
+
+// Helpers
+function buildStatsMap(pairs) {
+  const map = new Map();
+  pairs.forEach(({ label, value }) => {
+    if (!label) return;
+    const key = normalizeKey(label);
+    if (key && !map.has(key)) {
+      map.set(key, value || '');
+    }
+  });
+  return map;
+}
+
+function normalizeKey(label) {
+  return label.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function lookup(map, keys) {
+  for (const k of keys) {
+    const key = normalizeKey(k);
+    // Try exact
+    if (map.has(key)) return map.get(key);
+    // Try contains match among existing keys
+    for (const existingKey of map.keys()) {
+      if (existingKey.includes(key)) return map.get(existingKey);
+    }
+  }
+  return '';
+}
+
+function sanitize(value) {
+  return (value || '').toString();
+}
+
 // Export data as CSV
 function exportAsCSV() {
   addLogEntry('Starting CSV export process...', 'info');
@@ -411,7 +642,15 @@ function exportAsCSV() {
 
   // Create CSV content
   addLogEntry(`Preparing to export ${comparisonData.length} segment rows`, 'info');
-  const headers = ['Segment Name', 'Time 1', 'Time 2', 'Time Difference', 'Speed 1', 'Speed 2', 'Speed Difference'];
+  const headers = [
+    'Segment Name',
+    `Time (${getDisplayName(1)})`,
+    `Time (${getDisplayName(2)})`,
+    'Time Difference',
+    `Speed (${getDisplayName(1)})`,
+    `Speed (${getDisplayName(2)})`,
+    'Speed Difference'
+  ];
   let csvContent = headers.join(',') + '\n';
 
   comparisonData.forEach(row => {

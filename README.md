@@ -1,105 +1,107 @@
 # 🚴🏼‍♂️ Strava Segment Comparator Extension 🏃🏼‍♀️
 
-This is a Chrome extension that allows users to compare two Strava activities by their segments. The extension provides a user-friendly interface to input activity URLs, compare segments, and export the comparison data as a CSV file.
+Chrome extension to compare two Strava activities by their segments. It can auto-detect activity tabs you already have open, fetch segment data from each page, compute time and speed deltas, and export the results as CSV. It runs entirely in your browser; no servers are involved.
 
-If you have any questions or issues, please open an issue on GitHub.
+If you have questions or issues, please open an issue on GitHub.
 
 ## Features
 
-- **Auto-detect open Strava activity tabs** - Automatically populate URLs from the first two open Strava activity pages
-- Input URLs for two Strava activities manually if needed
-- Compare segments between the two activities
-- Filter segments by name
-- Export comparison data as a CSV file
-- View detailed activity logs
-- Save and restore previous comparisons
+- **Auto-detect open Strava activity tabs**: Scans your open tabs and auto-fills the first two activity URLs
+- **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
+- **Segment comparison**: Matches segments by exact name, preserves Activity 1 page order
+- **Athlete-aware headers**: Uses detected athlete names for table headers when available
+- **Activity stats panels**: Shows a side-by-side comparison of key activity stats
+- **CSV export**: One-click export of the comparison table
+- **Persistent results**: The last comparison is auto-restored on popup open
+- **Detailed logs**: Built-in activity log with statuses and errors; quick Clear button
 
-## Installation
+Note: The current UI does not provide interactive table filtering. The comparison table is a simple, readable table with colored time/speed deltas.
 
-1. Clone the repository:
-    ```sh
-    git clone https://github.com/yourusername/StravaSegmentComparer-extension.git
-    ```
-2. Navigate to the project directory:
-    ```sh
-    cd StravaSegmentComparer-extension
-    ```
-3. Install dependencies:
-    ```sh
-    npm install
-    ```
+## Install (Load Unpacked)
+
+1. In Chrome, go to `chrome://extensions/`
+2. Enable Developer mode
+3. Click “Load unpacked” and select this project folder
+4. Pin the extension (optional) and open it from the toolbar
+
+Required permissions: `tabs`, `storage`, and host access to `https://www.strava.com/*` (see `manifest.json`).
 
 ## Usage
 
-### Quick Start (Auto-Detection)
-1. Open 2 Strava activity pages in separate browser tabs
-2. Click the extension icon in your browser toolbar
-3. Click the "Auto-Detect" button to automatically populate both activity URLs
-4. Click "Compare Activities" to see the segment comparison
+### Quick start (Auto-detection)
 
-### Manual Usage
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" using the toggle in the top right corner
-3. Click "Load unpacked" and select the project directory
-4. The extension should now appear in your list of extensions
-5. Navigate to Strava activity pages and manually enter URLs in the extension popup
+1. Open two Strava activity pages in separate tabs
+2. Click the extension icon
+3. Click “Auto-Detect” to populate the URLs
+4. Click “Compare Activities”
+
+The extension opens the two activities in background tabs (inactive), waits a short moment for the page to load, asks the content script to extract data, then closes the tabs. Default timeout per activity is ~20s.
+
+### Manual
+
+1. Copy/paste two activity URLs into the input fields
+2. Click “Compare Activities”
+
+### Export
+
+Click “Export CSV” to download a CSV with headers that include the detected athlete names.
+
+### Status coloring
+
+- Time deltas: positive = slower (red), negative = faster (green)
+- Speed deltas: positive = faster (green), negative = slower (red)
+
+## How it works (high-level)
+
+- `content-script.js` runs only on `https://www.strava.com/activities/*` pages and extracts:
+  - Activity title, URL, activity ID, and athlete name (with multiple fallbacks)
+  - Activity stats from `.section.more-stats` using robust label/value heuristics
+  - Segment rows from common table variants, capturing name, time, speed, distance, power
+- `popup.js`:
+  - Auto-detects open Strava tabs (`chrome.tabs.query`) to auto-fill URLs
+  - Opens hidden tabs to fetch both activities, receives `segmentData` messages, compares by segment name, and computes deltas
+  - Renders results with headers that include detected athlete names, builds stats panels, and supports CSV export
+- `background.js` is a light MV3 service worker scaffold
 
 ## Development
 
-### File Structure
+You can use the checked-in CSS as-is. If you want to tweak styles and rebuild Tailwind:
 
-- `background.js`: Background script for the extension.
-- `content-script.js`: Content script injected into Strava pages.
-- `popup.html`: HTML for the popup interface.
-- `popup.js`: JavaScript for the popup interface.
-- `utils.js`: Utility functions used across the extension.
-- `tailwind.config.js`: Configuration for Tailwind CSS.
-- `postcss.config.js`: Configuration for PostCSS.
-- `manifest.json`: Manifest file for the Chrome extension.
-- `icons/`: Directory containing icon files.
-- `lib/`: Directory containing third-party libraries (e.g., Simple-DataTables).
+1. Install deps once (for Tailwind/PostCSS tooling):
 
-### Scripts
+   ```sh
+   npm install
+   ```
 
-- `popup.js`: Handles user interactions in the popup and communicates with the background script.
-- `utils.js`: Contains utility functions for data processing and API requests.
+2. Build CSS from `tailwind.css` to `tailwind.output.css`:
 
-### Styles
+   ```sh
+   npx tailwindcss -i tailwind.css -o tailwind.output.css --minify
+   ```
 
-- `tailwind.css`: Source file for Tailwind CSS.
-- `tailwind.output.css`: Compiled Tailwind CSS file.
-- `popup.css`: Custom styles for the popup interface.
+Project structure (selected):
 
-### Configuration
+- `manifest.json`: Chrome MV3 manifest (name, version, permissions)
+- `popup.html`, `popup.js`, `tailwind.output.css`: Popup UI and logic
+- `content-script.js`: Extracts activity stats and segments from Strava pages
+- `background.js`: MV3 service worker
+- `utils.js`: Parsing helpers for times and speeds
+- `icons/`: Extension icons
+- `lib/simple-datatables.*`: Library bundled for optional table enhancements (not required by current UI)
 
-- `tailwind.config.js`: Tailwind CSS configuration file.
-- `postcss.config.js`: PostCSS configuration file.
+## Privacy
 
-## Contributing
+- No network requests to external servers are made by the extension
+- Reads only Strava activity pages and your open tabs’ URLs (for auto-detection)
+- Comparison results are stored in `localStorage` to auto-restore the last view
 
-1. Fork the repository.
-2. Create a new branch:
-    ```sh
-    git checkout -b feature/your-feature-name
-    ```
-3. Make your changes and commit them:
-    ```sh
-    git commit -m "Add your commit message"
-    ```
-4. Push to the branch:
-    ```sh
-    git push origin feature/your-feature-name
-    ```
-5. Open a pull request.
+## Troubleshooting
+
+- “No segments found”: Make sure you’re on an activity page that has segments and let the page fully load. Click Compare again
+- Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages and the extension has the `tabs` permission
+- Athlete names missing or “unknown”: Not all pages expose the same metadata; this is expected sometimes
+- If the popup shows stale data, click “Clear” to reset and re-run the comparison
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE.md) file for details.
 
-## Acknowledgements
-
-- [Simple-DataTables](https://github.com/fiduswriter/Simple-DataTables) for the data table functionality.
-- [Tailwind CSS](https://tailwindcss.com/) for the utility-first CSS framework.
-
-## Contact
-
-For any inquiries or issues, please open an issue on GitHub or contact the repository owner.
+MIT — see `LICENSE.md`.
