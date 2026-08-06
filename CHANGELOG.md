@@ -1,5 +1,49 @@
 # Changelog
 
+## Version 2.4 - Reliability, correctness and cleanup
+
+### 🐛 Bug Fixes
+
+- **Speed deltas across unit systems**: speeds were parsed as bare numbers, so comparing an athlete on mph against one on km/h silently subtracted incompatible values and labelled the result `km/h`. Units are now parsed and normalized, and the delta is reported in activity 1's unit
+- **Runs produced empty speed columns**: the segment table for a run shows pace (`5:32 /km`), which no selector matched, so every run row fell back to `N/A` and rendered a meaningless `0.0 km/h` delta. Pace is now parsed and compared, and the columns are labelled *Pace* instead of *Speed*
+- **Repeated segments were dropped**: segments were keyed by name in a `Map`, so riding the same segment twice kept only the last effort and paired efforts arbitrarily. Matching now keys on Strava's segment ID plus an occurrence index
+- **Renamed segments stopped matching**: name equality meant any difference in punctuation or whitespace dropped the pair. Segment ID is now authoritative, with the name only as a fallback
+- **Delta shading was meaningless**: the tint intensity was computed by stripping non-digits from the formatted label, so `2:05` became the number `2.05` and a two-minute gap shaded lighter than a five-second one. Shading now scales on the real delta
+- **Missing times counted as zero**: an unparseable time became `0`, producing large fake deltas. Missing values are now `null` and render as `N/A`
+- **Leaked timers and cross-talk**: the fetch path never cleared its timeouts, closed already-closed tabs, and could resolve one activity's request with the other's data. Messaging is now request/response with no shared broadcast channel
+
+### 🔒 Security
+
+- Segment names and log messages are page-controlled text and were being written with `innerHTML`. All rendering now goes through `textContent` / `createElement`
+- Segment links are validated against `https://www.strava.com` before being used as an `href`
+- Removed `web_accessible_resources`, which exposed extension files to every site
+
+### ⚡ Reliability
+
+- Activity data is now read by the cheapest route available: directly from a tab that already has the activity open, else by fetching the HTML from within an existing strava.com tab, else by opening a background tab
+- The fixed 3-second wait before extraction is gone. The content script waits for the segments table with a `MutationObserver`, and the popup polls the tab until the content script answers
+- Background tabs are always closed, including when extraction fails
+
+### 🆕 Improvements
+
+- Segments present in only one activity are listed in a collapsible section instead of being silently discarded
+- All storage moved to `chrome.storage.local`; `Clear` no longer reloads the popup
+- CSV export quotes every field
+
+### 🧹 Cleanup
+
+- Removed `lib/simple-datatables.*` (~140 KB loaded on every popup open, unused) and its dead CSS rules
+- Removed `popup.css`, which was never linked from `popup.html`
+- Removed dead helpers: `getTimeDiffClass`, `getSpeedDiffClass`, `buildStatsMap`, `lookup`, `sanitize`, and the unused `dataTable` global
+- DOM reading moved into `extractor.js`, shared by the content script and the popup
+- Activity stats extraction no longer re-reads the same text once per ancestor element
+- Version strings in `manifest.json` and `popup.html` now agree
+
+### 🧪 Testing
+
+- Added Vitest with 46 tests: unit coverage for parsing and matching, DOM coverage for extraction, and an integration test that drives the real popup in jsdom
+- `npm test` runs the suite (it previously exited 1 by design)
+
 ## Version 2.2 - Help System Enhancement
 
 ### 🆕 New Features

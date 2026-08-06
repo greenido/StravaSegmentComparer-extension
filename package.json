@@ -1,20 +1,17 @@
 {
-  "name": "workspace",
-  "version": "1.0.0",
-  "main": "background.js",
-  "directories": {
-    "lib": "lib"
-  },
+  "name": "strava-segment-comparator",
+  "version": "2.4.0",
+  "description": "Chrome extension that compares the segments of two Strava activities",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
+  "license": "MIT",
+  "devDependencies": {
     "autoprefixer": "^10.4.21",
+    "jsdom": "^25.0.1",
     "postcss": "^8.5.3",
-    "tailwindcss": "^4.0.15"
+    "tailwindcss": "^3.4.17",
+    "vitest": "^2.1.8"
   }
 }
