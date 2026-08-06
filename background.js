@@ -1,12 +1,8 @@
-// Background script for the Strava Segment Comparator extension
+// Background service worker for the Strava Segment Comparator extension.
+//
+// The popup talks to content scripts directly with request/response messaging,
+// so there is nothing to relay here.
 
-// Listen for installation
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Strava Segment Comparator extension installed');
-});
-
-// Set up communication channel between popup and content scripts
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Forward messages from content script to popup
-  return true;
+  console.log('Strava Segment Comparator installed');
 });
