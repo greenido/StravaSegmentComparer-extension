@@ -4,6 +4,7 @@
   "description": "Chrome extension that compares the segments of two Strava activities",
   "private": true,
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "vitest run"
   },
   "license": "MIT",
