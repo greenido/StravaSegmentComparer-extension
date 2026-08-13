@@ -6,6 +6,7 @@ import {
   extractActivityStats,
   extractSegments,
   extractActivityData,
+  extractSegmentPersonalRecord,
   hasSegments
 } from '../extractor.js';
 
@@ -177,5 +178,77 @@ describe('hasSegments', () => {
   it('reports whether the segments table has rendered yet', () => {
     expect(hasSegments(parse(rideSegments))).toBe(true);
     expect(hasSegments(parse('<div></div>'))).toBe(false);
+  });
+});
+
+describe('segment distance and power', () => {
+  it('reads them from their own classes', () => {
+    const doc = parse(`
+      <table class="segments"><tbody>
+        <tr data-segment-effort-id="1">
+          <td class="name"><a href="/segments/9">Climb</a></td>
+          <td class="distance">1.24 km</td>
+          <td class="time">5:00</td>
+          <td class="power">241 W</td>
+        </tr>
+      </tbody></table>
+    `);
+
+    expect(extractSegments(doc, '1')[0]).toMatchObject({ distance: '1.24 km', power: '241 W' });
+  });
+
+  it('falls back to matching the cell contents when the classes are missing', () => {
+    const doc = parse(`
+      <table class="segments"><tbody>
+        <tr data-segment-effort-id="1">
+          <td><a href="/segments/9">Climb</a></td>
+          <td>1.24 km</td>
+          <td>128 m</td>
+          <td>5:00</td>
+          <td>241 W</td>
+        </tr>
+      </tbody></table>
+    `);
+
+    const segment = extractSegments(doc, '1')[0];
+    // "128 m" is the elevation column and must not be read as the distance.
+    expect(segment.distance).toBe('1.24 km');
+    expect(segment.power).toBe('241 W');
+  });
+
+  it('leaves them null when the row has neither', () => {
+    const segment = extractSegments(parse(rideSegments), '1')[0];
+
+    expect(segment.distance).toBeNull();
+    expect(segment.power).toBeNull();
+  });
+});
+
+describe('extractSegmentPersonalRecord', () => {
+  it('reads an explicitly marked-up PR', () => {
+    const doc = parse('<div data-testid="personal-record-time">12:34</div>');
+    expect(extractSegmentPersonalRecord(doc)).toEqual({ time: '12:34' });
+  });
+
+  it('reads a PR from a labelled table row', () => {
+    const doc = parse(`
+      <table><tbody>
+        <tr><td>Best 30 days</td><td>13:10</td></tr>
+        <tr><td>Personal Record</td><td>12:34</td></tr>
+      </tbody></table>
+    `);
+
+    expect(extractSegmentPersonalRecord(doc)).toEqual({ time: '12:34' });
+  });
+
+  it('reads a PR from a single run of text', () => {
+    const doc = parse('<div><span>PR 1:02:34</span></div>');
+    expect(extractSegmentPersonalRecord(doc)).toEqual({ time: '1:02:34' });
+  });
+
+  it('returns null rather than guessing when there is no PR on the page', () => {
+    // Null means "unknown", which renders as N/A. It never means "no PR".
+    expect(extractSegmentPersonalRecord(parse('<div>Log in to see your efforts</div>'))).toBeNull();
+    expect(extractSegmentPersonalRecord(parse('<div>Leaderboard 9:12</div>'))).toBeNull();
   });
 });

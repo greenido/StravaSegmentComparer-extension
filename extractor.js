@@ -292,8 +292,16 @@ function extractSegments(doc, activityId) {
         link,
         time,
         rate: speedOrPace,
-        distance: firstMatch(row, ['.distance']),
-        power: firstMatch(row, ['.power']),
+        // Distance falls back to km/mi only: elevation is the other m/ft
+        // column in the same row and would otherwise be picked up here.
+        distance:
+          firstMatch(row, ['.distance', '[data-testid="segment-distance"]']) ||
+          cellMatching(row, /^\d+(?:[.,]\d+)?\s*(km|mi)$/i) ||
+          null,
+        power:
+          firstMatch(row, ['.power', '[data-testid="segment-power"]']) ||
+          cellMatching(row, /^\d+(?:[.,]\d+)?\s*W$/i) ||
+          null,
         index
       });
     } catch (_) {
@@ -332,6 +340,77 @@ function hasSegments(doc) {
   return findSegmentRows(doc).length > 0;
 }
 
+/* ------------------------------------------------------------------ *
+ * Personal records
+ * ------------------------------------------------------------------ */
+
+// Self-contained: extractor.js runs in the content script, where utils.js is
+// not loaded, so it cannot borrow the parsing helpers from there.
+const TIME_TEXT_RE = /\b(\d{1,2}:\d{2}(?::\d{2})?)\b/;
+const PR_LABEL_RE = /\b(pr|personal record|my best|your best|best time)\b/i;
+
+function timeIn(el) {
+  if (!el) return null;
+  const match = (el.textContent || '').replace(/\s+/g, ' ').match(TIME_TEXT_RE);
+  return match ? match[1] : null;
+}
+
+/**
+ * Find the signed-in athlete's personal record on a `/segments/{id}` page.
+ *
+ * Strava's markup for this panel has changed repeatedly and differs between
+ * the logged-in and logged-out views, so this tries several shapes in
+ * decreasing order of confidence and returns null rather than guessing. A null
+ * means "unknown", which the UI renders as N/A — it never means "no PR".
+ *
+ * @returns {{time: string}|null}
+ */
+function extractSegmentPersonalRecord(doc) {
+  try {
+    // 1) Explicitly marked-up PR value.
+    const explicit = [
+      '[data-testid="personal-record-time"]',
+      '[data-testid="pr-time"]',
+      '.personal-record .time',
+      '.personal-record time',
+      '.pr-time'
+    ];
+    for (const selector of explicit) {
+      const time = timeIn(doc.querySelector(selector));
+      if (time) return { time };
+    }
+
+    // 2) A label/value pair (table row or definition list) labelled as the PR.
+    const pairs = Array.from(doc.querySelectorAll('tr, dl > div, li'));
+    for (const pair of pairs) {
+      const cells = pair.querySelectorAll('th, td, dt, dd, span, strong');
+      if (cells.length < 2) continue;
+
+      const labelText = (cells[0].textContent || '').trim();
+      if (!PR_LABEL_RE.test(labelText)) continue;
+
+      for (let i = 1; i < cells.length; i++) {
+        const time = timeIn(cells[i]);
+        if (time) return { time };
+      }
+    }
+
+    // 3) Leaf text that carries both the label and the time, e.g. "PR 12:34".
+    for (const el of doc.querySelectorAll('li, div, span, p, td, dd')) {
+      if (el.querySelector('li, div, span, p, td, dd')) continue; // leaves only
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 60 || !PR_LABEL_RE.test(text)) continue;
+
+      const match = text.match(TIME_TEXT_RE);
+      if (match) return { time: match[1] };
+    }
+  } catch (_) {
+    // A markup change should degrade to "unknown", not break the comparison.
+  }
+
+  return null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractActivityId,
@@ -339,6 +418,7 @@ if (typeof module !== 'undefined' && module.exports) {
     extractActivityStats,
     extractSegments,
     extractActivityData,
+    extractSegmentPersonalRecord,
     hasSegments
   };
 }

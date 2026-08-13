@@ -6,6 +6,7 @@
  */
 
 const KM_PER_MILE = 1.609344;
+const METRES_PER_MILE = 1609.344;
 
 /**
  * Parse a time string to seconds.
@@ -152,6 +153,52 @@ function compareRates(rate1, rate2) {
 }
 
 /**
+ * Parse a segment power cell ("241 W", "241w", "241 watts") to watts.
+ * @returns {number|null}
+ */
+function parsePower(powerStr) {
+  if (!powerStr) return null;
+
+  const raw = String(powerStr).replace(/\s+/g, ' ').trim();
+  if (!raw || raw === 'N/A' || raw === '-') return null;
+
+  const match = raw.match(/(-?\d+(?:[.,]\d+)?)\s*(?:w|watts?)\b/i);
+  return match ? parseFloat(match[1].replace(',', '.')) : null;
+}
+
+/**
+ * Parse a segment distance cell ("1.24 km", "0.8 mi", "450 m") to metres, so
+ * distances recorded in different unit systems stay comparable.
+ * @returns {number|null}
+ */
+function parseDistance(distanceStr) {
+  if (!distanceStr) return null;
+
+  const raw = String(distanceStr).replace(/\s+/g, ' ').trim();
+  if (!raw || raw === 'N/A' || raw === '-') return null;
+
+  const match = raw.match(/(-?\d+(?:[.,]\d+)?)\s*(km|mi|miles?|m|ft)\b/i);
+  if (!match) return null;
+
+  const value = parseFloat(match[1].replace(',', '.'));
+  switch (match[2].toLowerCase()) {
+    case 'km': return value * 1000;
+    case 'm': return value;
+    case 'ft': return value * 0.3048;
+    default: return value * METRES_PER_MILE;
+  }
+}
+
+/** Format a signed watt delta as "+12 W" / "-8 W". */
+function formatPowerDiff(diffWatts) {
+  if (diffWatts === null || diffWatts === undefined || Number.isNaN(diffWatts)) return 'N/A';
+
+  const rounded = Math.round(diffWatts);
+  if (rounded === 0) return '0 W';
+  return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded)} W`;
+}
+
+/**
  * Stable key for pairing a segment effort across two activities.
  *
  * Segment id is authoritative; the name is only a fallback for markup that
@@ -195,11 +242,18 @@ function compareSegmentLists(segments1, segments2) {
     const timeDiffSeconds = time1 === null || time2 === null ? null : time2 - time1;
     const rateComparison = compareRates(segment1.rate, segment2.rate);
 
+    const power1 = parsePower(segment1.power);
+    const power2 = parsePower(segment2.power);
+    const powerDiffWatts = power1 === null || power2 === null ? null : power2 - power1;
+
     matched.push({
       key,
+      segmentId: segment1.segmentId || null,
       name: segment1.name,
       link: segment1.link,
       link_2: segment2.link,
+      // The same segment, so either activity's reading will do.
+      distance: segment1.distance || segment2.distance || null,
       time_1: segment1.time || 'N/A',
       time_2: segment2.time || 'N/A',
       time_diff: formatTimeDiff(timeDiffSeconds),
@@ -208,7 +262,11 @@ function compareSegmentLists(segments1, segments2) {
       rate_2: segment2.rate || 'N/A',
       rate_diff: rateComparison ? rateComparison.text : 'N/A',
       rate_diff_value: rateComparison ? rateComparison.delta : null,
-      rate_positive_is_faster: rateComparison ? rateComparison.positiveIsFaster : true
+      rate_positive_is_faster: rateComparison ? rateComparison.positiveIsFaster : true,
+      power_1: segment1.power || 'N/A',
+      power_2: segment2.power || 'N/A',
+      power_diff: formatPowerDiff(powerDiffWatts),
+      power_diff_value: powerDiffWatts
     });
   });
 
@@ -227,16 +285,191 @@ function rateColumnLabel(segments) {
   return firstParsed && firstParsed.kind === 'pace' ? 'Pace' : 'Speed';
 }
 
+/** True when either activity reported average power for at least one segment. */
+function hasPowerData(matched) {
+  return (matched || []).some(
+    row => parsePower(row.power_1) !== null || parsePower(row.power_2) !== null
+  );
+}
+
+/** True when at least one matched row carries a personal record. */
+function hasPersonalRecords(matched) {
+  return (matched || []).some(row => row.pr_time_seconds !== null && row.pr_time_seconds !== undefined);
+}
+
+/* ------------------------------------------------------------------ *
+ * Summary
+ * ------------------------------------------------------------------ */
+
+const SUMMARY_HIGHLIGHT_COUNT = 3;
+
+/**
+ * Roll a matched list up into the answer people actually opened the popup for:
+ * how big the gap is, and which segments produced it.
+ *
+ * The net is a plain sum of per-segment deltas, which is what "I lost three
+ * minutes" means colloquially. It deliberately does not weight by segment
+ * length, so a long segment contributes more than a short one.
+ */
+function summarizeComparison(matched) {
+  const rows = (matched || []).filter(
+    row => typeof row.time_diff_seconds === 'number' && !Number.isNaN(row.time_diff_seconds)
+  );
+
+  const empty = {
+    total: (matched || []).length,
+    compared: 0,
+    netSeconds: null,
+    netText: 'N/A',
+    fasterCount: 0,
+    slowerCount: 0,
+    evenCount: 0,
+    biggestLosses: [],
+    biggestGains: []
+  };
+  if (!rows.length) return empty;
+
+  // Descending: worst losses at the front, best gains at the back.
+  const byDelta = [...rows].sort((a, b) => b.time_diff_seconds - a.time_diff_seconds);
+  const netSeconds = rows.reduce((sum, row) => sum + row.time_diff_seconds, 0);
+
+  return {
+    total: (matched || []).length,
+    compared: rows.length,
+    netSeconds,
+    netText: formatTimeDiff(netSeconds),
+    fasterCount: rows.filter(row => row.time_diff_seconds < 0).length,
+    slowerCount: rows.filter(row => row.time_diff_seconds > 0).length,
+    evenCount: rows.filter(row => row.time_diff_seconds === 0).length,
+    biggestLosses: byDelta.filter(row => row.time_diff_seconds > 0).slice(0, SUMMARY_HIGHLIGHT_COUNT),
+    biggestGains: byDelta
+      .filter(row => row.time_diff_seconds < 0)
+      .slice(-SUMMARY_HIGHLIGHT_COUNT)
+      .reverse()
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Sorting
+ * ------------------------------------------------------------------ */
+
+/** Rate cells sort on their normalized value so mph and km/h interleave correctly. */
+function rateSortValue(rateStr) {
+  const parsed = parseRate(rateStr);
+  if (!parsed) return null;
+  return parsed.kind === 'pace' ? parsed.secPerKm : parsed.kmh;
+}
+
+const SORT_ACCESSORS = {
+  name: row => (row.name || '').toLowerCase(),
+  distance: row => parseDistance(row.distance),
+  time_1: row => parseTimeToSeconds(row.time_1),
+  time_2: row => parseTimeToSeconds(row.time_2),
+  time_diff: row => row.time_diff_seconds,
+  rate_1: row => rateSortValue(row.rate_1),
+  rate_2: row => rateSortValue(row.rate_2),
+  rate_diff: row => row.rate_diff_value,
+  power_1: row => parsePower(row.power_1),
+  power_2: row => parsePower(row.power_2),
+  power_diff: row => row.power_diff_value,
+  pr_time: row => row.pr_time_seconds,
+  pr_diff: row => row.pr_diff_seconds
+};
+
+/** Whether a column can be sorted, so the UI knows which headers are clickable. */
+function isSortable(key) {
+  return Object.prototype.hasOwnProperty.call(SORT_ACCESSORS, key);
+}
+
+function isMissing(value) {
+  return value === null || value === undefined || (typeof value === 'number' && Number.isNaN(value));
+}
+
+/**
+ * Sort matched rows by one column.
+ *
+ * Rows with no value for the column always sink to the bottom, in both
+ * directions — a segment we could not parse is not "the fastest". Ties keep
+ * their original (activity 1 page) order.
+ */
+function sortMatched(matched, key, direction = 'asc') {
+  const rows = [...(matched || [])];
+  const accessor = SORT_ACCESSORS[key];
+  if (!accessor) return rows;
+
+  const sign = direction === 'desc' ? -1 : 1;
+
+  return rows
+    .map((row, index) => ({ row, index, value: accessor(row) }))
+    .sort((a, b) => {
+      const aMissing = isMissing(a.value);
+      const bMissing = isMissing(b.value);
+      if (aMissing || bMissing) {
+        if (aMissing && bMissing) return a.index - b.index;
+        return aMissing ? 1 : -1;
+      }
+      if (a.value < b.value) return -sign;
+      if (a.value > b.value) return sign;
+      return a.index - b.index;
+    })
+    .map(entry => entry.row);
+}
+
+/* ------------------------------------------------------------------ *
+ * Personal records
+ * ------------------------------------------------------------------ */
+
+/**
+ * Attach the signed-in athlete's PR for each segment onto the matched rows.
+ *
+ * The PR is compared against activity 1's time, since that is the column the
+ * rest of the table is anchored on. A positive diff means activity 1 was slower
+ * than the PR; a negative diff means that effort *was* a new PR (or the cached
+ * PR is stale).
+ *
+ * @param {Array} matched
+ * @param {Object} prBySegmentId  segment id -> { time } (or a falsy value when unknown)
+ */
+function applyPersonalRecords(matched, prBySegmentId) {
+  const lookup = prBySegmentId || {};
+
+  return (matched || []).map(row => {
+    const pr = row.segmentId ? lookup[row.segmentId] : null;
+    const prSeconds = pr && pr.time ? parseTimeToSeconds(pr.time) : null;
+    const time1 = parseTimeToSeconds(row.time_1);
+    const diff = prSeconds === null || time1 === null ? null : time1 - prSeconds;
+
+    return {
+      ...row,
+      pr_time: prSeconds === null ? 'N/A' : pr.time,
+      pr_time_seconds: prSeconds,
+      pr_diff: formatTimeDiff(diff),
+      pr_diff_seconds: diff
+    };
+  });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     KM_PER_MILE,
+    METRES_PER_MILE,
     parseTimeToSeconds,
     formatTimeDiff,
     formatSecondsToTime,
     parseRate,
+    parsePower,
+    parseDistance,
+    formatPowerDiff,
     compareRates,
     segmentKey,
     compareSegmentLists,
-    rateColumnLabel
+    rateColumnLabel,
+    hasPowerData,
+    hasPersonalRecords,
+    summarizeComparison,
+    rateSortValue,
+    isSortable,
+    sortMatched,
+    applyPersonalRecords
   };
 }

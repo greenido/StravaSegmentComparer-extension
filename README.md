@@ -10,7 +10,11 @@ If you have questions or issues, please open an issue on GitHub.
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
 - **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
+- **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
+- **Sortable columns**: Click a header to sort; click again to reverse
 - **Rides and runs**: Compares speed for rides and pace for runs, and normalizes across km/h vs mph and /km vs /mi
+- **Power**: Average power per segment and the delta, shown when either activity recorded it
+- **Personal records**: One click adds your PR for each segment and how far off it you were
 - **Unmatched segments**: Segments that only one activity has are listed rather than dropped
 - **Athlete-aware headers**: Uses detected athlete names for table headers when available
 - **Activity stats panels**: Shows a side-by-side comparison of key activity stats
@@ -18,7 +22,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **Persistent results**: The last comparison is auto-restored on popup open
 - **Detailed logs**: Built-in activity log with statuses and errors; quick Clear button
 
-Note: The current UI does not provide interactive table filtering. The comparison table is a simple, readable table with colored time and speed/pace deltas.
+Note: The current UI does not provide interactive table filtering. The comparison table is a simple, readable table with colored time and speed/pace deltas, sortable by any column.
 
 ## Install (Load Unpacked)
 
@@ -43,9 +47,42 @@ Required permissions: `tabs`, `storage`, and host access to `https://www.strava.
 1. Copy/paste two activity URLs into the input fields
 2. Click “Compare Activities”
 
+### Reading the summary
+
+Above the table you get the net gap, how many segments each athlete took, and
+the biggest three losses and gains by name. The net is a plain sum of the
+per-segment deltas — the sense in which people say “I lost three minutes” — so
+a long segment contributes more to it than a short one. It is not weighted by
+segment length.
+
+### Sorting
+
+Click any column header to sort by it; click the same header again to reverse.
+Segments with no value in that column always sink to the bottom, in both
+directions, so an unreadable row never ranks as the fastest. The default order
+is activity 1’s page order, which is the order you rode them.
+
+### Compare vs my PRs
+
+“Compare vs my PRs” adds two columns: your personal record on each segment, and
+how far activity 1 was off it. A negative value means that effort *was* the PR.
+
+Some caveats worth knowing:
+
+- The PR is **yours**, as the signed-in Strava athlete. It is only meaningful
+  when one of the two activities is yours
+- Strava has no bulk PR endpoint, so this is one request per segment. It is
+  capped at 60 segments per click, runs three at a time, and caches results for
+  24 hours. `Clear` does not empty the PR cache
+- Segments where the PR cannot be read show `N/A`. That means "unknown", not
+  "no PR" — Strava’s markup for this panel changes, and this reads it rather
+  than guessing
+
 ### Export
 
-Click “Export CSV” to download a CSV with headers that include the detected athlete names.
+Click “Export CSV” to download a CSV with headers that include the detected
+athlete names. It contains exactly the columns the table is showing, in the
+sort order you left it in.
 
 ### Status coloring
 
@@ -68,9 +105,9 @@ back automatically when a route fails:
 Files:
 
 - `extractor.js`: all DOM reading. Every function takes an explicit `Document`, so the same code runs against a live page or against fetched HTML
-- `content-script.js`: request/response bridge on strava.com — extract this page, or fetch another activity. It waits for the segments table with a `MutationObserver` instead of a fixed sleep
-- `popup.js`: tab detection, route selection, comparison, rendering, CSV export
-- `utils.js`: pure parsing and comparison helpers (times, speeds, paces, segment matching)
+- `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or fetch and parse a segment page for its PR. It waits for the segments table with a `MutationObserver` instead of a fixed sleep
+- `popup.js`: tab detection, route selection, comparison, rendering, CSV export. The table's columns are declared once in `COLUMNS`, which drives the headers, the cells and the CSV together
+- `utils.js`: pure parsing and comparison helpers (times, speeds, paces, power, distances, segment matching, sorting, summary)
 - `background.js`: minimal MV3 service worker
 
 ## Development
@@ -114,6 +151,8 @@ Project structure (selected):
 - Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages and the extension has the `tabs` permission
 - “Redirected away from the activity page”: You’re signed out, or the activity is private. Open it in a tab and compare again
 - Athlete names missing or “unknown”: Not all pages expose the same metadata; this is expected sometimes
+- “No personal records found”: You are either not signed in, or signed in as an athlete who has not ridden these segments. The PR columns stay hidden rather than filling with N/A
+- Power columns missing: Neither activity recorded power, or Strava served markup this version does not recognise. Runs never show them
 - If the popup shows stale data, click “Clear” to reset and re-run the comparison
 - The activity log in the popup names the route used for each activity, which is the fastest way to see where a comparison went wrong
 

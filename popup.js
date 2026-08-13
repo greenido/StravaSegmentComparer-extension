@@ -24,6 +24,7 @@ const compareBtn = document.getElementById('compareBtn');
 const statusDiv = document.getElementById('status');
 const resultsDiv = document.getElementById('results');
 const exportBtn = document.getElementById('exportBtn');
+const prBtn = document.getElementById('prBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
@@ -32,11 +33,16 @@ const helpSection = document.getElementById('helpSection');
 
 let logEntries = [];
 
-// Current comparison, kept for CSV export.
+// Current comparison, kept for CSV export and for re-rendering after a sort.
 let comparison = { matched: [], onlyIn1: [], onlyIn2: [] };
+let lastStats = { stats1: [], stats2: [] };
 let athlete1Name = null;
 let athlete2Name = null;
 let rateLabel = 'Speed';
+
+// null key means "activity 1 page order", which is course order and therefore
+// meaningful in its own right. Sorting is opt-in, by clicking a header.
+let sortState = { key: null, direction: 'desc' };
 
 /* ------------------------------------------------------------------ *
  * Startup
@@ -45,6 +51,7 @@ let rateLabel = 'Speed';
 document.addEventListener('DOMContentLoaded', () => {
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
+  prBtn.addEventListener('click', loadPersonalRecords);
   autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
 
   helpBtn.addEventListener('click', e => {
@@ -75,10 +82,11 @@ async function restoreState() {
   if (saved && saved.matched) {
     comparison = { matched: saved.matched, onlyIn1: saved.onlyIn1 || [], onlyIn2: saved.onlyIn2 || [] };
     rateLabel = saved.rateLabel || 'Speed';
+    lastStats = { stats1: saved.stats1 || [], stats2: saved.stats2 || [] };
     addLogEntry('Restored the previous comparison', 'info');
     renderComparison(comparison);
     if (saved.stats1 || saved.stats2) {
-      displayStatsComparison(saved.stats1 || [], saved.stats2 || []);
+      displayStatsComparison(lastStats.stats1, lastStats.stats2);
     }
     resultsDiv.classList.remove('hidden');
   }
@@ -91,7 +99,10 @@ async function clearResults() {
   await chrome.storage.local.remove('comparisonResults');
 
   comparison = { matched: [], onlyIn1: [], onlyIn2: [] };
+  sortState = { key: null, direction: 'desc' };
   document.getElementById('segmentsTableBody').replaceChildren();
+  document.getElementById('segmentsTableHead').replaceChildren();
+  document.getElementById('summarySection').replaceChildren();
   document.getElementById('activityStatsSection')?.remove();
   document.getElementById('unmatchedSection')?.remove();
   resultsDiv.classList.add('hidden');
@@ -178,6 +189,26 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Run `worker` over `items` with at most `limit` in flight.
+ * Used to fetch personal records without firing one request per segment at once.
+ */
+async function mapWithLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
 function unwrap(response) {
   if (!response) throw new Error('No response from the Strava page');
   if (!response.ok) throw new Error(response.error || 'Extraction failed');
@@ -202,6 +233,22 @@ async function extractViaProxyTab(proxyTabId, activityId) {
   return extractActivityData(doc, `https://www.strava.com/activities/${activityId}`);
 }
 
+/** Poll a tab until its content script is injected and answering. */
+async function waitForContentScript(tabId) {
+  const deadline = Date.now() + TAB_READY_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      return true;
+    } catch (_) {
+      await delay(PING_INTERVAL_MS);
+    }
+  }
+
+  return false;
+}
+
 /** Last resort: open the activity in a background tab and read it there. */
 async function extractViaNewTab(activityId) {
   const tab = await chrome.tabs.create({
@@ -211,20 +258,7 @@ async function extractViaNewTab(activityId) {
   addLogEntry(`Opened background tab ${tab.id} for activity ${activityId}`, 'info');
 
   try {
-    const deadline = Date.now() + TAB_READY_TIMEOUT_MS;
-    let ready = false;
-
-    // Poll until the content script is injected and answering.
-    while (!ready && Date.now() < deadline) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
-        ready = true;
-      } catch (_) {
-        await delay(PING_INTERVAL_MS);
-      }
-    }
-
-    if (!ready) {
+    if (!(await waitForContentScript(tab.id))) {
       throw new Error('Timed out waiting for the activity page to load');
     }
 
@@ -270,6 +304,32 @@ async function findProxyTabId() {
   return tabs.length ? tabs[0].id : null;
 }
 
+/**
+ * Run `fn` with a tab id that can fetch from strava.com on our behalf.
+ *
+ * An already-open tab is reused. Only when there is none do we open one, and
+ * it is always closed again — including when `fn` throws.
+ */
+async function withProxyTab(fn) {
+  const existingId = await findProxyTabId();
+  if (existingId !== null && existingId !== undefined) {
+    return fn(existingId);
+  }
+
+  const tab = await chrome.tabs.create({ url: 'https://www.strava.com/dashboard', active: false });
+  addLogEntry(`Opened background tab ${tab.id} to reach Strava`, 'info');
+
+  try {
+    if (!(await waitForContentScript(tab.id))) {
+      throw new Error('Timed out waiting for Strava to load');
+    }
+    return await fn(tab.id);
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    addLogEntry(`Closed background tab ${tab.id}`, 'info');
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Comparison
  * ------------------------------------------------------------------ */
@@ -313,6 +373,9 @@ async function compareActivities() {
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
+    // A fresh comparison starts in course order again.
+    sortState = { key: null, direction: 'desc' };
+    lastStats = { stats1: activity1Data.activityStats, stats2: activity2Data.activityStats };
 
     if (!comparison.matched.length) {
       showStatus('No segments in common between these two activities', 'error');
@@ -324,20 +387,140 @@ async function compareActivities() {
     displayStatsComparison(activity1Data.activityStats, activity2Data.activityStats);
     resultsDiv.classList.remove('hidden');
 
-    await chrome.storage.local.set({
-      comparisonResults: {
-        matched: comparison.matched,
-        onlyIn1: comparison.onlyIn1,
-        onlyIn2: comparison.onlyIn2,
-        rateLabel,
-        stats1: activity1Data.activityStats,
-        stats2: activity2Data.activityStats
-      }
-    });
+    await saveComparison();
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     compareBtn.disabled = false;
+  }
+}
+
+function saveComparison() {
+  return chrome.storage.local.set({
+    comparisonResults: {
+      matched: comparison.matched,
+      onlyIn1: comparison.onlyIn1,
+      onlyIn2: comparison.onlyIn2,
+      rateLabel,
+      stats1: lastStats.stats1,
+      stats2: lastStats.stats2
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Personal records
+ *
+ * Strava does not expose a PR endpoint we can call, so each segment's PR comes
+ * from its own `/segments/{id}` page, fetched through a strava.com tab and
+ * parsed there. That is one request per segment, so the work is capped, run at
+ * a small concurrency, and cached for a day.
+ * ------------------------------------------------------------------ */
+
+const PR_CACHE_KEY = 'prCache';
+const PR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PR_FETCH_CONCURRENCY = 3;
+const PR_MAX_SEGMENTS = 60;
+// Breathing room between requests, so a 60-segment ride is a steady trickle
+// rather than a burst at Strava.
+const PR_FETCH_SPACING_MS = 250;
+
+/** Read the PR cache, dropping entries older than the TTL. */
+async function readPrCache() {
+  const data = await chrome.storage.local.get(PR_CACHE_KEY);
+  const cached = data[PR_CACHE_KEY] || {};
+  const fresh = {};
+
+  Object.entries(cached).forEach(([segmentId, entry]) => {
+    if (entry && Date.now() - (entry.fetchedAt || 0) < PR_CACHE_TTL_MS) {
+      fresh[segmentId] = entry;
+    }
+  });
+
+  return fresh;
+}
+
+/**
+ * Look up the signed-in athlete's PR for every matched segment and add two
+ * columns comparing activity 1 against it.
+ *
+ * Note this is *your* PR as the signed-in athlete, which is only meaningful
+ * when one of the two activities is yours.
+ */
+async function loadPersonalRecords() {
+  if (!comparison.matched.length) {
+    showStatus('Compare two activities first', 'error');
+    return;
+  }
+
+  const segmentIds = [...new Set(comparison.matched.map(row => row.segmentId).filter(Boolean))];
+  if (!segmentIds.length) {
+    showStatus('These segments have no Strava segment id, so PRs cannot be looked up', 'error');
+    return;
+  }
+
+  const wanted = segmentIds.slice(0, PR_MAX_SEGMENTS);
+  if (wanted.length < segmentIds.length) {
+    addLogEntry(`Looking up the first ${PR_MAX_SEGMENTS} of ${segmentIds.length} segments`, 'warning');
+  }
+
+  prBtn.disabled = true;
+
+  try {
+    const cache = await readPrCache();
+    const missing = wanted.filter(segmentId => !(segmentId in cache));
+    addLogEntry(`${wanted.length - missing.length} PRs cached, ${missing.length} to fetch`, 'info');
+
+    if (missing.length) {
+      showStatus(`Fetching your PR for ${missing.length} segments...`, 'loading');
+
+      await withProxyTab(async tabId => {
+        let done = 0;
+
+        await mapWithLimit(missing, PR_FETCH_CONCURRENCY, async segmentId => {
+          try {
+            const response = await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentPr', segmentId });
+            cache[segmentId] = { pr: unwrap(response).pr || null, fetchedAt: Date.now() };
+          } catch (error) {
+            // Cache the miss too, so one bad segment is not retried on every click.
+            addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
+            cache[segmentId] = { pr: null, fetchedAt: Date.now() };
+          }
+
+          done += 1;
+          if (done % 5 === 0 || done === missing.length) {
+            showStatus(`Fetched ${done}/${missing.length} personal records...`, 'loading');
+          }
+          if (done < missing.length) await delay(PR_FETCH_SPACING_MS);
+        });
+      });
+
+      await chrome.storage.local.set({ [PR_CACHE_KEY]: cache });
+    }
+
+    const prBySegmentId = {};
+    Object.entries(cache).forEach(([segmentId, entry]) => {
+      if (entry.pr) prBySegmentId[segmentId] = entry.pr;
+    });
+
+    comparison = {
+      ...comparison,
+      matched: applyPersonalRecords(comparison.matched, prBySegmentId)
+    };
+
+    const found = comparison.matched.filter(row => row.pr_time_seconds !== null).length;
+    renderComparison(comparison);
+    await saveComparison();
+
+    if (found) {
+      showStatus(`Found your PR for ${found} of ${wanted.length} segments`, 'success');
+    } else {
+      showStatus('No personal records found — are you signed in to Strava as the athlete who rode these?', 'error');
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+  } finally {
+    prBtn.disabled = false;
   }
 }
 
@@ -348,27 +531,6 @@ async function compareActivities() {
 function getDisplayName(index) {
   const name = index === 1 ? athlete1Name : athlete2Name;
   return name && name.trim() ? name.trim() : `Activity ${index}`;
-}
-
-function updateTableHeaders() {
-  const table = document.getElementById('segmentsTable');
-  if (!table) return;
-
-  const timeHeaders = table.querySelectorAll('thead th.col-time');
-  const rateHeaders = table.querySelectorAll('thead th.col-speed');
-  const rateDiffHeader = table.querySelector('thead th.col-rate-diff');
-
-  if (timeHeaders.length >= 2) {
-    timeHeaders[0].textContent = `Time (${getDisplayName(1)})`;
-    timeHeaders[1].textContent = `Time (${getDisplayName(2)})`;
-  }
-  if (rateHeaders.length >= 2) {
-    rateHeaders[0].textContent = `${rateLabel} (${getDisplayName(1)})`;
-    rateHeaders[1].textContent = `${rateLabel} (${getDisplayName(2)})`;
-  }
-  if (rateDiffHeader) {
-    rateDiffHeader.textContent = `${rateLabel} Diff`;
-  }
 }
 
 /** Only ever link to strava.com; segment names come from a page we don't own. */
@@ -403,50 +565,334 @@ function diffStyle(delta, positiveIsFaster, scale) {
     : `background-color: rgba(220, 38, 38, ${alpha.toFixed(2)});`;
 }
 
+/**
+ * The segment name, with the segment's distance underneath it.
+ *
+ * Distance lives here rather than in its own column because it is the same for
+ * both activities — it is context for the row, not something to compare.
+ */
+function buildNameCell(row) {
+  const td = document.createElement('td');
+
+  const href = safeStravaLink(row.link);
+  if (href) {
+    const link = document.createElement('a');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'text-blue-500 hover:underline';
+    link.textContent = row.name;
+    td.appendChild(link);
+  } else {
+    td.textContent = row.name;
+  }
+
+  if (row.distance) {
+    const distance = document.createElement('div');
+    distance.className = 'segment-distance';
+    distance.textContent = row.distance;
+    td.appendChild(distance);
+  }
+
+  return td;
+}
+
+/**
+ * The table's columns, in order.
+ *
+ * A column with a `when` is only shown if the data supports it, so runs do not
+ * get empty power columns and the PR columns stay hidden until they are asked
+ * for. Header text, cell contents and CSV output all come from here, so they
+ * cannot drift apart.
+ */
+const COLUMNS = [
+  {
+    key: 'name',
+    className: 'col-segment',
+    label: () => 'Segment Name',
+    build: buildNameCell,
+    csv: row => row.name
+  },
+  {
+    key: 'time_1',
+    className: 'col-time',
+    label: () => `Time (${getDisplayName(1)})`,
+    text: row => row.time_1
+  },
+  {
+    key: 'time_2',
+    className: 'col-time',
+    label: () => `Time (${getDisplayName(2)})`,
+    text: row => row.time_2
+  },
+  {
+    key: 'time_diff',
+    className: 'col-diff',
+    label: () => 'Time Diff',
+    csvLabel: () => 'Time Difference',
+    text: row => row.time_diff,
+    // 60s of difference reaches full tint.
+    style: row => diffStyle(row.time_diff_seconds, false, 60)
+  },
+  {
+    key: 'rate_1',
+    className: 'col-speed',
+    label: () => `${rateLabel} (${getDisplayName(1)})`,
+    text: row => row.rate_1
+  },
+  {
+    key: 'rate_2',
+    className: 'col-speed',
+    label: () => `${rateLabel} (${getDisplayName(2)})`,
+    text: row => row.rate_2
+  },
+  {
+    key: 'rate_diff',
+    className: 'col-diff col-rate-diff',
+    label: () => `${rateLabel} Diff`,
+    csvLabel: () => `${rateLabel} Difference`,
+    text: row => row.rate_diff,
+    // Speeds saturate at 5 km/h, paces at 30 s/km.
+    style: row =>
+      diffStyle(row.rate_diff_value, row.rate_positive_is_faster, row.rate_positive_is_faster ? 5 : 30)
+  },
+  {
+    key: 'power_1',
+    className: 'col-power',
+    label: () => `Power (${getDisplayName(1)})`,
+    text: row => row.power_1,
+    when: data => hasPowerData(data.matched)
+  },
+  {
+    key: 'power_2',
+    className: 'col-power',
+    label: () => `Power (${getDisplayName(2)})`,
+    text: row => row.power_2,
+    when: data => hasPowerData(data.matched)
+  },
+  {
+    key: 'power_diff',
+    className: 'col-diff',
+    label: () => 'Power Diff',
+    text: row => row.power_diff,
+    // More watts is not automatically better, but it is the reading a cyclist
+    // expects to see rewarded, and 50 W is a decisive gap.
+    style: row => diffStyle(row.power_diff_value, true, 50),
+    when: data => hasPowerData(data.matched)
+  },
+  {
+    key: 'pr_time',
+    className: 'col-time',
+    label: () => 'Your PR',
+    text: row => row.pr_time || 'N/A',
+    when: data => hasPersonalRecords(data.matched)
+  },
+  {
+    key: 'pr_diff',
+    className: 'col-diff',
+    label: () => `vs PR (${getDisplayName(1)})`,
+    text: row => row.pr_diff || 'N/A',
+    style: row => diffStyle(row.pr_diff_seconds, false, 60),
+    when: data => hasPersonalRecords(data.matched)
+  }
+];
+
+function visibleColumns(data) {
+  return COLUMNS.filter(column => !column.when || column.when(data));
+}
+
+/** Clicking a header sorts by it; clicking the active header reverses it. */
+const DEFAULT_SORT_DIRECTION = {
+  name: 'asc',
+  time_1: 'asc',
+  time_2: 'asc',
+  time_diff: 'desc',
+  rate_1: 'desc',
+  rate_2: 'desc',
+  rate_diff: 'desc',
+  power_1: 'desc',
+  power_2: 'desc',
+  power_diff: 'desc',
+  pr_time: 'asc',
+  pr_diff: 'desc'
+};
+
+function toggleSort(key) {
+  sortState =
+    sortState.key === key
+      ? { key, direction: sortState.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: DEFAULT_SORT_DIRECTION[key] || 'asc' };
+
+  renderComparison(comparison);
+}
+
+function renderTableHead(columns) {
+  const tr = document.createElement('tr');
+
+  columns.forEach(column => {
+    const th = document.createElement('th');
+    if (column.className) th.className = column.className;
+    th.textContent = column.label();
+
+    if (!isSortable(column.key)) {
+      tr.appendChild(th);
+      return;
+    }
+
+    const active = sortState.key === column.key;
+    th.classList.add('sortable');
+    th.tabIndex = 0;
+    th.setAttribute('role', 'button');
+    th.title = `Sort by ${column.label()}`;
+    th.setAttribute(
+      'aria-sort',
+      active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none'
+    );
+
+    if (active) {
+      const arrow = document.createElement('span');
+      arrow.className = 'sort-arrow';
+      arrow.textContent = sortState.direction === 'asc' ? '▲' : '▼';
+      th.appendChild(arrow);
+    }
+
+    th.addEventListener('click', () => toggleSort(column.key));
+    th.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleSort(column.key);
+      }
+    });
+
+    tr.appendChild(th);
+  });
+
+  document.getElementById('segmentsTableHead').replaceChildren(tr);
+}
+
 function renderComparison(data) {
+  const columns = visibleColumns(data);
+  const rows = sortState.key
+    ? sortMatched(data.matched, sortState.key, sortState.direction)
+    : data.matched;
+
+  renderTableHead(columns);
+
   const tableBody = document.getElementById('segmentsTableBody');
   tableBody.replaceChildren();
 
-  data.matched.forEach(row => {
+  rows.forEach(row => {
     const tr = document.createElement('tr');
 
-    const nameCell = document.createElement('td');
-    const href = safeStravaLink(row.link);
-    if (href) {
-      const link = document.createElement('a');
-      link.href = href;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.className = 'text-blue-500 hover:underline';
-      link.textContent = row.name;
-      nameCell.appendChild(link);
-    } else {
-      nameCell.textContent = row.name;
-    }
-    tr.appendChild(nameCell);
-
-    tr.appendChild(cell(row.time_1));
-    tr.appendChild(cell(row.time_2));
-
-    const timeDiffCell = cell(row.time_diff);
-    // 60s of difference reaches full tint.
-    timeDiffCell.style.cssText = diffStyle(row.time_diff_seconds, false, 60);
-    tr.appendChild(timeDiffCell);
-
-    tr.appendChild(cell(row.rate_1));
-    tr.appendChild(cell(row.rate_2));
-
-    const rateDiffCell = cell(row.rate_diff);
-    // Speeds saturate at 5 km/h, paces at 30 s/km.
-    const rateScale = row.rate_positive_is_faster ? 5 : 30;
-    rateDiffCell.style.cssText = diffStyle(row.rate_diff_value, row.rate_positive_is_faster, rateScale);
-    tr.appendChild(rateDiffCell);
+    columns.forEach(column => {
+      const td = column.build ? column.build(row) : cell(column.text(row));
+      if (!column.build && column.style) td.style.cssText = column.style(row);
+      tr.appendChild(td);
+    });
 
     tableBody.appendChild(tr);
   });
 
-  updateTableHeaders();
+  renderSummary(data);
   renderUnmatched(data);
+}
+
+/* ------------------------------------------------------------------ *
+ * Summary
+ * ------------------------------------------------------------------ */
+
+/** One "Segment name +1:12" chip, coloured by whether it was a gain or a loss. */
+function summaryChip(row) {
+  const chip = document.createElement('span');
+  chip.className = `summary-chip ${row.time_diff_seconds > 0 ? 'summary-chip-loss' : 'summary-chip-gain'}`;
+
+  const name = document.createElement('span');
+  name.className = 'summary-chip-name';
+  name.textContent = row.name;
+  chip.appendChild(name);
+
+  const delta = document.createElement('span');
+  delta.className = 'summary-chip-delta';
+  delta.textContent = row.time_diff;
+  chip.appendChild(delta);
+
+  return chip;
+}
+
+function summaryRow(title, rows) {
+  if (!rows.length) return null;
+
+  const line = document.createElement('div');
+  line.className = 'summary-line';
+
+  const label = document.createElement('span');
+  label.className = 'summary-label';
+  label.textContent = title;
+  line.appendChild(label);
+
+  rows.forEach(row => line.appendChild(summaryChip(row)));
+  return line;
+}
+
+/**
+ * The headline answer: how big the gap is and which segments produced it.
+ *
+ * Everything here is derived from the same deltas the table shows, so it needs
+ * no extra data — it just puts the conclusion above the fold.
+ */
+function renderSummary(data) {
+  const container = document.getElementById('summarySection');
+  container.replaceChildren();
+
+  if (!data.matched.length) return;
+
+  const summary = summarizeComparison(data.matched);
+  if (!summary.compared) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'summary-panel';
+
+  // Deltas are activity 2 minus activity 1, so activity 2 is the subject.
+  const slower = summary.netSeconds > 0;
+
+  const headline = document.createElement('div');
+  headline.className = 'summary-headline';
+
+  const net = document.createElement('span');
+  net.className = `summary-net ${slower ? 'summary-net-loss' : 'summary-net-gain'}`;
+  net.textContent = summary.netText;
+  headline.appendChild(net);
+
+  const caption = document.createElement('span');
+  caption.className = 'summary-caption';
+  const direction = summary.netSeconds === 0 ? 'level with' : slower ? 'slower than' : 'faster than';
+  caption.textContent =
+    `${getDisplayName(2)} ${direction} ${getDisplayName(1)} across ` +
+    `${summary.compared} matched segment${summary.compared === 1 ? '' : 's'}`;
+  headline.appendChild(caption);
+  panel.appendChild(headline);
+
+  const counts = document.createElement('div');
+  counts.className = 'summary-counts';
+  counts.textContent =
+    `Faster on ${summary.fasterCount}, slower on ${summary.slowerCount}` +
+    (summary.evenCount ? `, level on ${summary.evenCount}` : '') +
+    (summary.compared < summary.total ? ` · ${summary.total - summary.compared} not comparable` : '');
+  panel.appendChild(counts);
+
+  const losses = summaryRow('Biggest losses', summary.biggestLosses);
+  if (losses) panel.appendChild(losses);
+
+  const gains = summaryRow('Biggest gains', summary.biggestGains);
+  if (gains) panel.appendChild(gains);
+
+  const note = document.createElement('div');
+  note.className = 'summary-note';
+  note.textContent =
+    'Net is the plain sum of per-segment deltas, so longer segments count for more. Click a column header to sort.';
+  panel.appendChild(note);
+
+  container.appendChild(panel);
 }
 
 /** Segments present in only one activity, so they are not silently dropped. */
@@ -599,27 +1045,20 @@ function exportAsCSV() {
     return;
   }
 
-  const headers = [
-    'Segment Name',
-    `Time (${getDisplayName(1)})`,
-    `Time (${getDisplayName(2)})`,
-    'Time Difference',
-    `${rateLabel} (${getDisplayName(1)})`,
-    `${rateLabel} (${getDisplayName(2)})`,
-    `${rateLabel} Difference`
+  // Same columns the table is showing, in the same order and sort.
+  const columns = visibleColumns(comparison);
+  const rows = sortState.key
+    ? sortMatched(comparison.matched, sortState.key, sortState.direction)
+    : comparison.matched;
+
+  const lines = [
+    columns.map(column => csvField((column.csvLabel || column.label)())).join(',')
   ];
 
-  const lines = [headers.map(csvField).join(',')];
-  comparison.matched.forEach(row => {
-    lines.push([
-      row.name,
-      row.time_1,
-      row.time_2,
-      row.time_diff,
-      row.rate_1,
-      row.rate_2,
-      row.rate_diff
-    ].map(csvField).join(','));
+  rows.forEach(row => {
+    lines.push(
+      columns.map(column => csvField(column.csv ? column.csv(row) : column.text(row))).join(',')
+    );
   });
 
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
