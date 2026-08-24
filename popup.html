@@ -18,7 +18,7 @@
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-xxl font-bold text-strava flex items-center">
         <img src="icons/run-128-logo.png" alt="Info" class="h-5 w-5 text-blue-500 mr-1" style="padding-right: 2em;">
-        Strava Segment Comparator 🐅 2.5
+        Strava Segment Comparator 🐅 2.6
       </h1>
       <button id="helpBtn" class="help-icon" type="button" title="Show help and tips" aria-label="Show help and tips" aria-controls="helpSection" aria-expanded="false" data-tooltip="Help & tips">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -96,26 +96,24 @@
             Export CSV
             </button>
 
+          <button id="prBtn" title="Fetch your personal record for each segment from Strava" class="btn text-xs py-1 px-3 bg-blue-500 hover:bg-blue-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+            Compare vs my PRs
+          </button>
+
           <button id="clearBtn" class="btn text-xs py-1 px-3 bg-red-500 hover:bg-red-600 text-white">
             Clear
           </button>
-          
+
         </div>
-   
-      
+
+      <div id="summarySection"></div>
+
       <div class="overflow-x-auto">
         <table id="segmentsTable" class="w-full text-sm">
-          <thead>
-            <tr>
-              <th class="col-segment">Segment Name</th>
-              <th class="col-time">Time 1</th>
-              <th class="col-time">Time 2</th>
-              <th class="col-diff">Time Diff</th>
-              <th class="col-speed">Speed 1</th>
-              <th class="col-speed">Speed 2</th>
-              <th class="col-diff col-rate-diff">Speed Diff</th>
-            </tr>
-          </thead>
+          <thead id="segmentsTableHead"></thead>
           <tbody id="segmentsTableBody"></tbody>
         </table>
       </div>

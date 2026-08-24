@@ -55,6 +55,7 @@ async function loadPopup() {
 
 const row = (overrides = {}) => ({
   key: 'id:1#0',
+  segmentId: '1',
   name: 'Old La Honda',
   link: 'https://www.strava.com/activities/1/segments/11',
   time_1: '18:20',
@@ -163,6 +164,183 @@ describe('popup rendering', () => {
 
 });
 
+describe('the summary strip', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  const named = (name, seconds) =>
+    row({ name, time_diff: formatTimeDiff(seconds), time_diff_seconds: seconds });
+
+  it('leads with the net gap and which way it went', () => {
+    renderComparison({
+      matched: [named('Climb', 90), named('Descent', -30)],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const summary = document.getElementById('summarySection');
+    expect(summary.querySelector('.summary-net').textContent).toBe('+1:00');
+    expect(summary.querySelector('.summary-net').className).toContain('summary-net-loss');
+    expect(summary.textContent).toContain('slower than');
+    expect(summary.textContent).toContain('2 matched segments');
+  });
+
+  it('counts the segments won and lost', () => {
+    renderComparison({
+      matched: [named('A', 10), named('B', -10), named('C', 0)],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(document.querySelector('.summary-counts').textContent).toContain('Faster on 1, slower on 1');
+    expect(document.querySelector('.summary-counts').textContent).toContain('level on 1');
+  });
+
+  it('names the biggest losses and gains, worst first', () => {
+    renderComparison({
+      matched: [named('Small', 5), named('Huge', 300), named('Gain', -60)],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const chips = [...document.querySelectorAll('.summary-chip-name')].map(el => el.textContent);
+    expect(chips.slice(0, 2)).toEqual(['Huge', 'Small']);
+    expect(chips).toContain('Gain');
+
+    const gainChip = [...document.querySelectorAll('.summary-chip')].find(chip =>
+      chip.textContent.startsWith('Gain')
+    );
+    expect(gainChip.className).toContain('summary-chip-gain');
+  });
+
+  it('renders a hostile segment name in the summary as text', () => {
+    const hostile = '<img src=x onerror="globalThis.pwnedSummary = true">';
+    renderComparison({ matched: [named(hostile, 30)], onlyIn1: [], onlyIn2: [] });
+
+    const chip = document.querySelector('.summary-chip-name');
+    expect(chip.textContent).toBe(hostile);
+    expect(chip.querySelector('img')).toBeNull();
+    expect(globalThis.pwnedSummary).toBeUndefined();
+  });
+
+  it('stays empty when nothing is comparable', () => {
+    renderComparison({
+      matched: [row({ time_diff: 'N/A', time_diff_seconds: null })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(document.getElementById('summarySection').children).toHaveLength(0);
+  });
+});
+
+describe('sorting by a column header', () => {
+  const clickHeader = label => {
+    const th = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>
+      el.textContent.startsWith(label)
+    );
+    th.click();
+    return th;
+  };
+
+  const names = () =>
+    [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.children[0].textContent);
+
+  // Driven through the real comparison rather than renderComparison(), because
+  // a header click re-renders from the popup's own state.
+  beforeEach(async () => {
+    await loadPopup();
+
+    const activity = times => ({
+      activityId: '1',
+      athleteName: 'Ada',
+      activityStats: [],
+      segments: ['Beta', 'Alpha', 'Gamma'].map((name, i) => ({
+        segmentId: String(i),
+        occurrence: 0,
+        name,
+        link: 'https://www.strava.com/activities/1/segments/1',
+        time: times[i],
+        rate: '18.0 km/h',
+        index: i
+      }))
+    });
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: tabId === 10 ? activity(['5:00', '4:00', '6:00']) : activity(['5:10', '3:30', '7:40'])
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  });
+
+  it('starts in activity 1 page order, which is course order', () => {
+    expect(names()).toEqual(['Beta', 'Alpha', 'Gamma']);
+  });
+
+  it('sorts biggest loss first on the first click', () => {
+    clickHeader('Time Diff');
+    expect(names()).toEqual(['Gamma', 'Beta', 'Alpha']);
+  });
+
+  it('reverses when the same header is clicked again', () => {
+    clickHeader('Time Diff');
+    clickHeader('Time Diff');
+    expect(names()).toEqual(['Alpha', 'Beta', 'Gamma']);
+  });
+
+  it('marks the sorted column for assistive tech', () => {
+    const th = clickHeader('Time Diff');
+    const sorted = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>
+      el.textContent.startsWith('Time Diff')
+    );
+
+    expect(th.getAttribute('role')).toBe('button');
+    expect(sorted.getAttribute('aria-sort')).toBe('descending');
+    expect(sorted.querySelector('.sort-arrow').textContent).toBe('▼');
+  });
+});
+
+describe('power columns', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  it('are hidden when neither activity recorded power', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+
+    const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+    expect(headers.some(h => h.includes('Power'))).toBe(false);
+  });
+
+  it('appear as soon as one segment has a power reading', () => {
+    renderComparison({
+      matched: [row({ power_1: '220 W', power_2: '245 W', power_diff: '+25 W', power_diff_value: 25 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+    expect(headers).toContain('Power Diff');
+
+    const cells = [...document.querySelectorAll('#segmentsTableBody tr td')].map(td => td.textContent);
+    expect(cells).toContain('+25 W');
+  });
+
+  it('shows the segment distance under its name', () => {
+    renderComparison({ matched: [row({ distance: '5.7 km' })], onlyIn1: [], onlyIn2: [] });
+
+    expect(document.querySelector('.segment-distance').textContent).toBe('5.7 km');
+  });
+});
+
 describe('comparing two activities that are already open', () => {
   const runSegments = (athlete, times) => ({
     activityId: athlete === 'Ada' ? '1' : '2',
@@ -230,6 +408,27 @@ describe('comparing two activities that are already open', () => {
     expect(stats.textContent).toContain('Distance');
   });
 
+  it('exports the visible columns in the visible order', async () => {
+    const captured = [];
+    globalThis.URL.createObjectURL = () => 'blob:stub';
+    globalThis.URL.revokeObjectURL = () => {};
+    globalThis.Blob = class {
+      constructor(parts) {
+        captured.push(parts.join(''));
+      }
+    };
+    HTMLAnchorElement.prototype.click = () => {};
+
+    // Sorting the table sorts the export too, so the CSV matches what was seen.
+    [...document.querySelectorAll('#segmentsTable thead th')]
+      .find(th => th.textContent.startsWith('Time Diff'))
+      .click();
+    exportAsCSV();
+
+    const [, first] = captured[0].split('\n');
+    expect(first).toContain('"Mile 1"');
+  });
+
   it('exports a CSV with the athlete names in the headers', async () => {
     const captured = [];
     globalThis.URL.createObjectURL = () => 'blob:stub';
@@ -246,5 +445,109 @@ describe('comparing two activities that are already open', () => {
     const [header, first] = captured[0].split('\n');
     expect(header).toContain('"Pace (Ada)"');
     expect(first).toBe('"Mile 1","5:00","5:05","+0:05","5:30 /km","5:30 /km","0:00 /km"');
+  });
+});
+
+describe('comparing against your personal records', () => {
+  let sent;
+
+  const setup = async (prBySegmentId, overrides = {}) => {
+    await loadPopup();
+    sent = [];
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.create = async () => {
+      throw new Error('should not need a new tab when strava is already open');
+    };
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      sent.push(request);
+
+      if (request.action === 'fetchSegmentPr') {
+        if (overrides.failOn === request.segmentId) throw new Error('network boom');
+        const time = prBySegmentId[request.segmentId];
+        return { ok: true, pr: time ? { time } : null };
+      }
+
+      const segments = times => ({
+        activityId: '1',
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: times.map((time, i) => ({
+          segmentId: String(100 + i),
+          occurrence: 0,
+          name: `Climb ${i + 1}`,
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time,
+          rate: '18.0 km/h',
+          index: i
+        }))
+      });
+
+      return { ok: true, data: tabId === 10 ? segments(['5:00', '4:00']) : segments(['5:10', '3:50']) };
+    };
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  };
+
+  const headers = () =>
+    [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+
+  it('adds the PR columns and compares activity 1 against them', async () => {
+    await setup({ 100: '4:30', 101: '4:10' });
+    await loadPersonalRecords();
+
+    expect(headers()).toContain('Your PR');
+    expect(headers()).toContain('vs PR (Ada)');
+
+    const first = document.querySelectorAll('#segmentsTableBody tr')[0];
+    expect([...first.children].at(-2).textContent).toBe('4:30');
+    expect([...first.children].at(-1).textContent).toBe('+0:30');
+  });
+
+  it('shows a negative diff when the effort was itself a new PR', async () => {
+    await setup({ 100: '4:30', 101: '4:10' });
+    await loadPersonalRecords();
+
+    // Climb 2 was ridden in 4:00 against a stored PR of 4:10.
+    const second = document.querySelectorAll('#segmentsTableBody tr')[1];
+    expect([...second.children].at(-1).textContent).toBe('-0:10');
+  });
+
+  it('fetches each segment once and reuses the cache on the next click', async () => {
+    await setup({ 100: '4:30', 101: '4:10' });
+
+    await loadPersonalRecords();
+    const firstPass = sent.filter(r => r.action === 'fetchSegmentPr').length;
+
+    await loadPersonalRecords();
+    const total = sent.filter(r => r.action === 'fetchSegmentPr').length;
+
+    expect(firstPass).toBe(2);
+    expect(total).toBe(2);
+  });
+
+  it('keeps going when one segment fails, and does not retry it', async () => {
+    await setup({ 100: '4:30', 101: '4:10' }, { failOn: '101' });
+    await loadPersonalRecords();
+
+    const rows = document.querySelectorAll('#segmentsTableBody tr');
+    expect([...rows[0].children].at(-2).textContent).toBe('4:30');
+    expect([...rows[1].children].at(-2).textContent).toBe('N/A');
+
+    await loadPersonalRecords();
+    expect(sent.filter(r => r.action === 'fetchSegmentPr').length).toBe(2);
+  });
+
+  it('leaves the table alone when Strava exposes no PR at all', async () => {
+    await setup({});
+    await loadPersonalRecords();
+
+    expect(headers()).not.toContain('Your PR');
+    expect(document.getElementById('status').textContent).toContain('No personal records found');
   });
 });

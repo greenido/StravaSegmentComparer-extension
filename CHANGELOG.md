@@ -1,5 +1,51 @@
 # Changelog
 
+## Version 2.6 - Where the time went
+
+### 🆕 New Features
+
+- **Summary strip**: above the table, a headline showing the net gap, how many
+  segments each athlete won, and the three biggest losses and gains by name.
+  The question you opened the popup to answer is now the first thing on screen
+- **Sortable columns**: click any header to sort by it, click again to reverse.
+  Rows with no value for that column always sink to the bottom rather than
+  ranking as "fastest", ties keep course order, and the CSV export follows
+  whatever sort is on screen. The default is still activity 1's page order,
+  which is course order
+- **Power columns**: average power per segment for both activities plus the
+  delta. Power was already being scraped and thrown away. The columns only
+  appear when at least one activity recorded power, so runs are unaffected
+- **Segment distance**: shown under the segment name, since it is context for
+  the row rather than something to compare
+- **Compare vs my PRs**: fetches your personal record for each matched segment
+  from its Strava page and adds "Your PR" and "vs PR" columns. Results are
+  cached for 24 hours, fetched three at a time, and capped at 60 segments per
+  click. A segment whose PR cannot be read shows N/A — never a fabricated zero
+
+### 🔧 Technical Changes
+
+- The table is now generated from a single column model, so header text, cell
+  contents and CSV output cannot drift apart, and conditional columns are one
+  `when` predicate rather than three parallel edits
+- `content-script.js` gained `fetchSegmentPr`, which fetches and parses the
+  segment page in the content script so only the PR crosses the message
+  boundary instead of a megabyte of HTML
+- Path validation on the content script's fetch helper: it will only request
+  `/activities/{id}` and `/segments/{id}`
+- The background-tab ping loop moved into `waitForContentScript`, now shared by
+  activity extraction and `withProxyTab`
+- Segment distance and power fall back to matching cell contents when Strava
+  drops the `.distance` / `.power` classes. The distance fallback deliberately
+  accepts only km/mi, because the elevation column is the other m/ft value in
+  the same row
+
+### 🧪 Testing
+
+- 94 tests, up from 46: summary maths, sort ordering and missing-value
+  handling, power and distance parsing, PR pairing, PR extraction across four
+  markup shapes, and an integration test that drives the PR fetch end to end
+  including a mid-flight failure and the cache
+
 ## Version 2.4 - Reliability, correctness and cleanup
 
 ### 🐛 Bug Fixes

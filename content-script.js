@@ -8,6 +8,8 @@
  *   extractSegmentData  -> extract from this live page
  *   fetchActivityHtml   -> same-origin fetch of another activity, so the popup
  *                          can parse it without opening a tab
+ *   fetchSegmentPr      -> same-origin fetch of a segment page, parsed here so
+ *                          only the PR crosses the message boundary
  *
  * Depends on extractor.js, loaded first by the manifest.
  */
@@ -53,11 +55,16 @@ async function handleExtract() {
 }
 
 /**
- * Fetch another Strava activity from within the page's own origin so the
- * session cookie is sent. Returns the raw HTML for the popup to parse.
+ * Fetch a Strava page from within the page's own origin so the session cookie
+ * is sent. `expected` guards against a silent redirect to the login page being
+ * parsed as if it were the thing we asked for.
  */
-async function handleFetchActivityHtml(activityId) {
-  const response = await fetch(`https://www.strava.com/activities/${activityId}`, {
+async function fetchStravaPage(path, expected) {
+  if (!/^\/(activities|segments)\/\d+$/.test(path)) {
+    throw new Error(`Refusing to fetch ${path}`);
+  }
+
+  const response = await fetch(`https://www.strava.com${path}`, {
     credentials: 'include',
     redirect: 'follow'
   });
@@ -65,13 +72,26 @@ async function handleFetchActivityHtml(activityId) {
   if (!response.ok) {
     throw new Error(`Strava returned HTTP ${response.status}`);
   }
-
-  // A logged-out or redirected response is a login page, not an activity.
-  if (!/\/activities\/\d+/.test(response.url)) {
-    throw new Error('Redirected away from the activity page (not signed in?)');
+  if (!expected.test(response.url)) {
+    throw new Error('Redirected away from the requested page (not signed in?)');
   }
 
   return response.text();
+}
+
+function handleFetchActivityHtml(activityId) {
+  return fetchStravaPage(`/activities/${activityId}`, /\/activities\/\d+/);
+}
+
+/**
+ * Fetch a segment page and pull the PR out of it here, so a ~1 MB document
+ * never has to be serialized across the message boundary — the popup only
+ * needs the one time value.
+ */
+async function handleFetchSegmentPr(segmentId) {
+  const html = await fetchStravaPage(`/segments/${segmentId}`, /\/segments\/\d+/);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return extractSegmentPersonalRecord(doc);
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -85,6 +105,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'fetchActivityHtml') {
     handleFetchActivityHtml(request.activityId)
       .then(html => sendResponse({ ok: true, html }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'fetchSegmentPr') {
+    handleFetchSegmentPr(request.segmentId)
+      .then(pr => sendResponse({ ok: true, pr }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
