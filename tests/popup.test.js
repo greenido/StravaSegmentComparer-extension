@@ -468,7 +468,7 @@ describe('comparing against your personal records', () => {
       if (request.action === 'fetchSegmentPr') {
         if (overrides.failOn === request.segmentId) throw new Error('network boom');
         const time = prBySegmentId[request.segmentId];
-        return { ok: true, pr: time ? { time } : null };
+        return { ok: true, pr: time ? { time } : null, historyError: overrides.historyError };
       }
 
       const segments = times => ({
@@ -476,8 +476,8 @@ describe('comparing against your personal records', () => {
         athleteName: tabId === 10 ? 'Ada' : 'Grace',
         activityStats: [],
         segments: times.map((time, i) => ({
-          segmentId: String(100 + i),
-          occurrence: 0,
+          segmentId: overrides.noIds ? null : overrides.laps ? '100' : String(100 + i),
+          occurrence: overrides.laps ? i : 0,
           name: `Climb ${i + 1}`,
           link: 'https://www.strava.com/activities/1/segments/1',
           time,
@@ -541,6 +541,34 @@ describe('comparing against your personal records', () => {
 
     await loadPersonalRecords();
     expect(sent.filter(r => r.action === 'fetchSegmentPr').length).toBe(2);
+  });
+
+  it('asks for a fresh comparison, rather than fetching, when no segment has an id', async () => {
+    // What a comparison saved by 2.6 looks like: it could not read segment ids.
+    await setup({ 100: '4:30' }, { noIds: true });
+    await loadPersonalRecords();
+
+    expect(sent.filter(r => r.action === 'fetchSegmentPr')).toHaveLength(0);
+    expect(document.getElementById('status').textContent).toContain('click "Compare Activities" again');
+  });
+
+  it('counts segments, not laps, when reporting how many PRs it found', async () => {
+    // Two laps of one segment are two rows but one PR.
+    await setup({ 100: '3:45' }, { laps: true });
+    await loadPersonalRecords();
+
+    expect(document.getElementById('status').textContent).toBe('Found your PR for 1 of 1 segments');
+  });
+
+  it('logs once, with the reason, when PRs had to come from segment pages', async () => {
+    await setup({ 100: '4:30', 101: '4:10' }, { historyError: 'Strava returned HTTP 403' });
+    await loadPersonalRecords();
+
+    const lines = [...document.querySelectorAll('#logContent .log-entry')]
+      .map(el => el.textContent)
+      .filter(text => text.includes('Effort history unavailable'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('2 segment(s) (Strava returned HTTP 403)');
   });
 
   it('leaves the table alone when Strava exposes no PR at all', async () => {

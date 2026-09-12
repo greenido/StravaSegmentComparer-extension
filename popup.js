@@ -455,7 +455,9 @@ async function loadPersonalRecords() {
 
   const segmentIds = [...new Set(comparison.matched.map(row => row.segmentId).filter(Boolean))];
   if (!segmentIds.length) {
-    showStatus('These segments have no Strava segment id, so PRs cannot be looked up', 'error');
+    // Most likely a comparison saved by a version that could not read segment
+    // ids; re-reading the activities fixes it.
+    showStatus('No Strava segment ids in this comparison — click "Compare Activities" again, then retry', 'error');
     return;
   }
 
@@ -474,13 +476,18 @@ async function loadPersonalRecords() {
     if (missing.length) {
       showStatus(`Fetching your PR for ${missing.length} segments...`, 'loading');
 
+      const historyErrors = [];
+
       await withProxyTab(async tabId => {
         let done = 0;
 
         await mapWithLimit(missing, PR_FETCH_CONCURRENCY, async segmentId => {
           try {
-            const response = await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentPr', segmentId });
-            cache[segmentId] = { pr: unwrap(response).pr || null, fetchedAt: Date.now() };
+            const response = unwrap(
+              await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentPr', segmentId })
+            );
+            if (response.historyError) historyErrors.push(response.historyError);
+            cache[segmentId] = { pr: response.pr || null, fetchedAt: Date.now() };
           } catch (error) {
             // Cache the miss too, so one bad segment is not retried on every click.
             addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
@@ -495,6 +502,15 @@ async function loadPersonalRecords() {
         });
       });
 
+      // One line, not one per segment: it is almost always the same reason.
+      if (historyErrors.length) {
+        addLogEntry(
+          `Effort history unavailable for ${historyErrors.length} segment(s) (${historyErrors[0]}), ` +
+            'read their segment pages instead',
+          'warning'
+        );
+      }
+
       await chrome.storage.local.set({ [PR_CACHE_KEY]: cache });
     }
 
@@ -508,7 +524,8 @@ async function loadPersonalRecords() {
       matched: applyPersonalRecords(comparison.matched, prBySegmentId)
     };
 
-    const found = comparison.matched.filter(row => row.pr_time_seconds !== null).length;
+    // Per segment, not per row: laps of one segment share one PR.
+    const found = wanted.filter(segmentId => prBySegmentId[segmentId]).length;
     renderComparison(comparison);
     await saveComparison();
 

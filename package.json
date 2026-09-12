@@ -1,6 +1,6 @@
 {
   "name": "strava-segment-comparator",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Chrome extension that compares the segments of two Strava activities",
   "private": true,
   "scripts": {

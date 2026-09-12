@@ -7,6 +7,7 @@ import {
   extractSegments,
   extractActivityData,
   extractSegmentPersonalRecord,
+  personalRecordFromHistory,
   hasSegments
 } from '../extractor.js';
 
@@ -101,6 +102,81 @@ describe('extractSegments', () => {
 
   it('returns an empty list when there is no segments table', () => {
     expect(extractSegments(parse('<div>no segments here</div>'), '1')).toEqual([]);
+  });
+});
+
+describe('segment ids on a real activity page', () => {
+  // The shape Strava actually serves: rows carry only the effort id and no
+  // segment link. The segment id is in the inline script that seeds the page's
+  // efforts collection, with the effort id as a string.
+  const bootstrap = (payload, tail = ', { parse: true });') =>
+    `<script>
+      jQuery(document).ready(function() {
+        pageView.segmentEfforts().reset(${JSON.stringify(payload)}${tail}
+      });
+    </script>`;
+
+  const rows = `
+    <table class="dense hoverable marginless segments"><tbody>
+      <tr data-segment-effort-id="9000000000000000001" class="full-columns track-props">
+        <td class="name-col"><div class="name">Sprint {not json}</div></td>
+        <td class="time-col">52<abbr class="unit" title="seconds">s</abbr></td>
+      </tr>
+      <tr data-segment-effort-id="9000000000000000002" class="full-columns track-props">
+        <td class="name-col"><div class="name">Long Climb</div></td>
+        <td class="time-col">29:03</td>
+      </tr>
+    </tbody></table>`;
+
+  const payload = {
+    efforts: [
+      { id: '9000000000000000001', segment_id: 111, name: 'Sprint {not json}' },
+      { id: '9000000000000000002', segment_id: 222, name: 'Long Climb' }
+    ],
+    hidden_efforts: [{ id: '9000000000000000003', segment_id: 333, name: 'Hidden TT' }]
+  };
+
+  it('reads the segment id from the inline efforts data', () => {
+    const segments = extractSegments(parse(bootstrap(payload) + rows), '1');
+
+    expect(segments.map(s => s.segmentId)).toEqual(['111', '222']);
+    expect(segments[0].effortId).toBe('9000000000000000001');
+  });
+
+  it('finds the id of a hidden effort too', () => {
+    const hiddenRow = `
+      <table class="segments"><tbody>
+        <tr data-segment-effort-id="9000000000000000003"><td class="name">Hidden TT</td></tr>
+      </tbody></table>`;
+
+    expect(extractSegments(parse(bootstrap(payload) + hiddenRow), '1')[0].segmentId).toBe('333');
+  });
+
+  it('does not depend on the second argument to reset()', () => {
+    const segments = extractSegments(parse(bootstrap(payload, ');') + rows), '1');
+    expect(segments.map(s => s.segmentId)).toEqual(['111', '222']);
+  });
+
+  it('leaves the id null, without throwing, when the inline data is unreadable', () => {
+    const broken = '<script>pageView.segmentEfforts().reset({"efforts": [ oops</script>';
+    const segments = extractSegments(parse(broken + rows), '1');
+
+    expect(segments).toHaveLength(2);
+    expect(segments.map(s => s.segmentId)).toEqual([null, null]);
+  });
+
+  it('never mistakes an effort link for a segment id', () => {
+    // /activities/{activity}/segments/{effort} is an effort page; its number is
+    // an effort id, and fetching /segments/{that} would be a different segment.
+    const html = `
+      <table class="segments"><tbody>
+        <tr data-segment-effort-id="5">
+          <td><a href="/activities/1/segments/5">Effort link only</a></td>
+          <td>2:00</td>
+        </tr>
+      </tbody></table>`;
+
+    expect(extractSegments(parse(html), '1')[0].segmentId).toBeNull();
   });
 });
 
@@ -216,11 +292,60 @@ describe('segment distance and power', () => {
     expect(segment.power).toBe('241 W');
   });
 
+  it('reads distance from the stats line under the name, as Strava serves it', () => {
+    // Labels are localized ("Distance", "距离"), so only the value can be trusted.
+    const doc = parse(`
+      <table class="segments"><tbody>
+        <tr data-segment-effort-id="1">
+          <td class="name-col">
+            <div class="name">Climb</div>
+            <div class="stats">
+              <span title="Elevation difference"> 45<abbr class="unit"> m</abbr> </span>
+              <span title="Distance"> 0.49<abbr class="unit"> km</abbr> </span>
+              <span title="Average grade"> 9.7<abbr class="unit">%</abbr> </span>
+            </div>
+          </td>
+          <td class="time-col">52<abbr class="unit">s</abbr></td>
+        </tr>
+      </tbody></table>
+    `);
+
+    expect(extractSegments(doc, '1')[0].distance).toBe('0.49 km');
+  });
+
   it('leaves them null when the row has neither', () => {
     const segment = extractSegments(parse(rideSegments), '1')[0];
 
     expect(segment.distance).toBeNull();
     expect(segment.power).toBeNull();
+  });
+});
+
+describe('personalRecordFromHistory', () => {
+  // Shape of GET /athlete/segments/{id}/history: the signed-in athlete's
+  // efforts on the segment, elapsed_time in whole seconds.
+  const history = (...times) => ({ efforts: times.map((t, i) => ({ id: i, elapsed_time: t })) });
+
+  it('takes the fastest elapsed time as the PR', () => {
+    expect(personalRecordFromHistory(history(812, 754, 790))).toEqual({ time: '12:34' });
+  });
+
+  it('formats an hour-long PR with hours', () => {
+    expect(personalRecordFromHistory(history(3754))).toEqual({ time: '1:02:34' });
+  });
+
+  it('pads seconds on a sub-minute PR', () => {
+    expect(personalRecordFromHistory(history(46))).toEqual({ time: '0:46' });
+  });
+
+  it('skips efforts without a usable time', () => {
+    const data = { efforts: [{ elapsed_time: null }, { elapsed_time: 0 }, { elapsed_time: '9' }, { elapsed_time: 61 }] };
+    expect(personalRecordFromHistory(data)).toEqual({ time: '1:01' });
+  });
+
+  it('returns null when the athlete has no efforts on the segment', () => {
+    expect(personalRecordFromHistory({ efforts: [] })).toBeNull();
+    expect(personalRecordFromHistory(null)).toBeNull();
   });
 });
 
