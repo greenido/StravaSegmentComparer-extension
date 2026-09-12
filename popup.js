@@ -583,10 +583,10 @@ function diffStyle(delta, positiveIsFaster, scale) {
 }
 
 /**
- * The segment name, with the segment's distance underneath it.
+ * The segment name, with its distance and average grade underneath.
  *
- * Distance lives here rather than in its own column because it is the same for
- * both activities — it is context for the row, not something to compare.
+ * These live here rather than in their own columns because they are the same
+ * for both activities — context for the row, not something to compare.
  */
 function buildNameCell(row) {
   const td = document.createElement('td');
@@ -604,13 +604,28 @@ function buildNameCell(row) {
     td.textContent = row.name;
   }
 
-  if (row.distance) {
-    const distance = document.createElement('div');
-    distance.className = 'segment-distance';
-    distance.textContent = row.distance;
-    td.appendChild(distance);
+  const grade = typeof row.grade === 'number' ? `${row.grade.toFixed(1)}%` : null;
+  const context = [row.distance, grade].filter(Boolean).join(' · ');
+  if (context) {
+    const line = document.createElement('div');
+    line.className = 'segment-distance';
+    line.textContent = context;
+    td.appendChild(line);
   }
 
+  return td;
+}
+
+/** An effort's time, with Strava's medal for it (PR, 2nd, KOM…) alongside. */
+function buildTimeCell(time, medal) {
+  const td = cell(time);
+  if (medal) {
+    const badge = document.createElement('span');
+    badge.className = 'medal';
+    badge.textContent = medal.label;
+    if (medal.description) badge.title = medal.description;
+    td.appendChild(badge);
+  }
   return td;
 }
 
@@ -634,12 +649,14 @@ const COLUMNS = [
     key: 'time_1',
     className: 'col-time',
     label: () => `Time (${getDisplayName(1)})`,
+    build: row => buildTimeCell(row.time_1, row.achievement_1),
     text: row => row.time_1
   },
   {
     key: 'time_2',
     className: 'col-time',
     label: () => `Time (${getDisplayName(2)})`,
+    build: row => buildTimeCell(row.time_2, row.achievement_2),
     text: row => row.time_2
   },
   {
@@ -698,6 +715,52 @@ const COLUMNS = [
     when: data => hasPowerData(data.matched)
   },
   {
+    key: 'hr_1',
+    className: 'col-hr',
+    label: () => `HR (${getDisplayName(1)})`,
+    text: row => row.hr_1 || 'N/A',
+    when: data => hasHeartRateData(data.matched)
+  },
+  {
+    key: 'hr_2',
+    className: 'col-hr',
+    label: () => `HR (${getDisplayName(2)})`,
+    text: row => row.hr_2 || 'N/A',
+    when: data => hasHeartRateData(data.matched)
+  },
+  {
+    key: 'hr_diff',
+    className: 'col-diff',
+    label: () => 'HR Diff',
+    // Deliberately unshaded: a lower heart rate is only good news if the time
+    // held up, so the colour would mislead as often as it helped.
+    text: row => row.hr_diff || 'N/A',
+    when: data => hasHeartRateData(data.matched)
+  },
+  {
+    key: 'vam_1',
+    className: 'col-vam',
+    label: () => `VAM (${getDisplayName(1)})`,
+    text: row => row.vam_1 || 'N/A',
+    when: data => hasVamData(data.matched)
+  },
+  {
+    key: 'vam_2',
+    className: 'col-vam',
+    label: () => `VAM (${getDisplayName(2)})`,
+    text: row => row.vam_2 || 'N/A',
+    when: data => hasVamData(data.matched)
+  },
+  {
+    key: 'vam_diff',
+    className: 'col-diff',
+    label: () => 'VAM Diff',
+    text: row => row.vam_diff || 'N/A',
+    // Climbing faster is better; 200 m/h is a decisive gap.
+    style: row => diffStyle(row.vam_diff_value, true, 200),
+    when: data => hasVamData(data.matched)
+  },
+  {
     key: 'pr_time',
     className: 'col-time',
     label: () => 'Your PR',
@@ -730,6 +793,12 @@ const DEFAULT_SORT_DIRECTION = {
   power_1: 'desc',
   power_2: 'desc',
   power_diff: 'desc',
+  hr_1: 'desc',
+  hr_2: 'desc',
+  hr_diff: 'desc',
+  vam_1: 'desc',
+  vam_2: 'desc',
+  vam_diff: 'desc',
   pr_time: 'asc',
   pr_diff: 'desc'
 };
@@ -906,7 +975,8 @@ function renderSummary(data) {
   const note = document.createElement('div');
   note.className = 'summary-note';
   note.textContent =
-    'Net is the plain sum of per-segment deltas, so longer segments count for more. Click a column header to sort.';
+    'Net is the plain sum of per-segment deltas, so longer segments count for more, and a segment ' +
+    'inside another (a climb within a lap) counts in both. Click a column header to sort.';
   panel.appendChild(note);
 
   container.appendChild(panel);

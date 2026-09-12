@@ -339,6 +339,106 @@ describe('power columns', () => {
 
     expect(document.querySelector('.segment-distance').textContent).toBe('5.7 km');
   });
+
+  it('adds the average grade next to the distance', () => {
+    renderComparison({ matched: [row({ distance: '0.49 km', grade: 9.68 })], onlyIn1: [], onlyIn2: [] });
+
+    expect(document.querySelector('.segment-distance').textContent).toBe('0.49 km · 9.7%');
+  });
+});
+
+describe('heart rate, VAM and medals', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+  const cells = () => [...document.querySelectorAll('#segmentsTableBody tr td')];
+
+  it('shows heart-rate columns only when an activity recorded heart rate', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+    expect(headers().some(h => h.startsWith('HR'))).toBe(false);
+
+    renderComparison({
+      matched: [row({ hr_1: '150 bpm', hr_2: '155 bpm', hr_diff: '+5 bpm', hr_diff_value: 5 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+    expect(headers()).toContain('HR Diff');
+    expect(cells().map(td => td.textContent)).toContain('+5 bpm');
+  });
+
+  it('shows VAM columns for climbs, with a faster climb shaded green', () => {
+    renderComparison({
+      matched: [row({ vam_1: '800 m/h', vam_2: '960 m/h', vam_diff: '+160 m/h', vam_diff_value: 160 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(headers()).toContain('VAM Diff');
+    const diff = cells().find(td => td.textContent === '+160 m/h');
+    expect(diff.style.backgroundColor).toContain('34, 197, 94');
+  });
+
+  it("puts Strava's medal next to the effort's time", () => {
+    renderComparison({
+      matched: [row({ achievement_1: { label: 'PR', description: 'Personal Record' } })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const medal = document.querySelector('#segmentsTableBody .medal');
+    expect(medal.textContent).toBe('PR');
+    expect(medal.title).toBe('Personal Record');
+    expect(medal.parentElement).toBe(cells()[1]);
+  });
+
+  it('shows the medal from a real comparison, and keeps it out of the exported time', async () => {
+    const captured = [];
+    globalThis.URL.createObjectURL = () => 'blob:stub';
+    globalThis.URL.revokeObjectURL = () => {};
+    globalThis.Blob = class {
+      constructor(parts) {
+        captured.push(parts.join(''));
+      }
+    };
+    HTMLAnchorElement.prototype.click = () => {};
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: tabId === 10 ? '1' : '2',
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: [{
+          segmentId: '1',
+          name: 'Climb',
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time: '5:00',
+          rate: '18.0 km/h',
+          achievement: tabId === 10 ? { sprite: 'icon-at-pr-1', description: 'Personal Record' } : null
+        }]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    expect(document.querySelector('#segmentsTableBody .medal').textContent).toBe('PR');
+
+    exportAsCSV();
+    const [, first] = captured[0].split('\n');
+    expect(first.split(',')[1]).toBe('"5:00"');
+  });
+
+  it('says in the summary that nested segments count more than once', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+    expect(document.querySelector('.summary-note').textContent).toContain('counts in both');
+  });
 });
 
 describe('comparing two activities that are already open', () => {

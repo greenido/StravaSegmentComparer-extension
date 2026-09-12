@@ -189,13 +189,69 @@ function parseDistance(distanceStr) {
   }
 }
 
+/** Format a signed delta as "+12 W" / "-8 bpm", rounded to whole units. */
+function formatSignedDiff(delta, unit) {
+  if (delta === null || delta === undefined || Number.isNaN(delta)) return 'N/A';
+
+  const rounded = Math.round(delta);
+  if (rounded === 0) return `0 ${unit}`;
+  return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded)} ${unit}`;
+}
+
 /** Format a signed watt delta as "+12 W" / "-8 W". */
 function formatPowerDiff(diffWatts) {
-  if (diffWatts === null || diffWatts === undefined || Number.isNaN(diffWatts)) return 'N/A';
+  return formatSignedDiff(diffWatts, 'W');
+}
 
-  const rounded = Math.round(diffWatts);
-  if (rounded === 0) return '0 W';
-  return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded)} W`;
+/**
+ * Parse a segment heart-rate cell ("121 bpm", "121bpm") to beats per minute.
+ * @returns {number|null}
+ */
+function parseHeartRate(hrStr) {
+  if (!hrStr) return null;
+  const match = String(hrStr).match(/(\d+(?:[.,]\d+)?)\s*bpm\b/i);
+  return match ? parseFloat(match[1].replace(',', '.')) : null;
+}
+
+// Below this average grade VAM says nothing useful, so it is left out.
+const VAM_MIN_GRADE = 3;
+
+/**
+ * VAM: metres climbed per hour, as distance × average grade ÷ time.
+ *
+ * Strava only fills in its own `vam` for categorized climbs, so it is computed
+ * here, the same way for both activities. On one segment the climb is fixed,
+ * so VAM moves only with time — it is the time comparison in climbing units.
+ * @returns {number|null} metres per hour
+ */
+function computeVam(distanceStr, gradePercent, timeStr) {
+  const metres = parseDistance(distanceStr);
+  const seconds = parseTimeToSeconds(timeStr);
+  if (metres === null || !seconds) return null;
+  if (typeof gradePercent !== 'number' || !(gradePercent >= VAM_MIN_GRADE)) return null;
+
+  return (metres * gradePercent / 100) * 3600 / seconds;
+}
+
+function formatVam(metresPerHour) {
+  return metresPerHour === null ? 'N/A' : `${Math.round(metresPerHour)} m/h`;
+}
+
+const PR_MEDAL_LABELS = ['PR', '2nd', '3rd'];
+
+/**
+ * A short badge for Strava's medal on an effort.
+ *
+ * Strava's personal-best medals are `icon-at-pr-1` to `-3`; anything else uses
+ * Strava's own (localized) description, e.g. "KOM".
+ * @returns {{label: string, description: string|null}|null}
+ */
+function achievementLabel(achievement) {
+  if (!achievement) return null;
+
+  const pr = /icon-at-pr-(\d+)/.exec(achievement.sprite || '');
+  const label = (pr && PR_MEDAL_LABELS[Number(pr[1]) - 1]) || achievement.description;
+  return label ? { label, description: achievement.description || null } : null;
 }
 
 /**
@@ -246,14 +302,25 @@ function compareSegmentLists(segments1, segments2) {
     const power2 = parsePower(segment2.power);
     const powerDiffWatts = power1 === null || power2 === null ? null : power2 - power1;
 
+    const hr1 = parseHeartRate(segment1.heartRate);
+    const hr2 = parseHeartRate(segment2.heartRate);
+    const hrDiff = hr1 === null || hr2 === null ? null : hr2 - hr1;
+
+    // The same segment, so either activity's reading will do.
+    const distance = segment1.distance || segment2.distance || null;
+    const grade = [segment1.grade, segment2.grade].find(g => typeof g === 'number' && Number.isFinite(g));
+    const vam1 = computeVam(distance, grade, segment1.time);
+    const vam2 = computeVam(distance, grade, segment2.time);
+    const vamDiff = vam1 === null || vam2 === null ? null : vam2 - vam1;
+
     matched.push({
       key,
       segmentId: segment1.segmentId || null,
       name: segment1.name,
       link: segment1.link,
       link_2: segment2.link,
-      // The same segment, so either activity's reading will do.
-      distance: segment1.distance || segment2.distance || null,
+      distance,
+      grade: grade === undefined ? null : grade,
       time_1: segment1.time || 'N/A',
       time_2: segment2.time || 'N/A',
       time_diff: formatTimeDiff(timeDiffSeconds),
@@ -266,7 +333,17 @@ function compareSegmentLists(segments1, segments2) {
       power_1: segment1.power || 'N/A',
       power_2: segment2.power || 'N/A',
       power_diff: formatPowerDiff(powerDiffWatts),
-      power_diff_value: powerDiffWatts
+      power_diff_value: powerDiffWatts,
+      hr_1: segment1.heartRate || 'N/A',
+      hr_2: segment2.heartRate || 'N/A',
+      hr_diff: formatSignedDiff(hrDiff, 'bpm'),
+      hr_diff_value: hrDiff,
+      vam_1: formatVam(vam1),
+      vam_2: formatVam(vam2),
+      vam_diff: formatSignedDiff(vamDiff, 'm/h'),
+      vam_diff_value: vamDiff,
+      achievement_1: achievementLabel(segment1.achievement),
+      achievement_2: achievementLabel(segment2.achievement)
     });
   });
 
@@ -290,6 +367,18 @@ function hasPowerData(matched) {
   return (matched || []).some(
     row => parsePower(row.power_1) !== null || parsePower(row.power_2) !== null
   );
+}
+
+/** True when either activity reported heart rate for at least one segment. */
+function hasHeartRateData(matched) {
+  return (matched || []).some(
+    row => parseHeartRate(row.hr_1) !== null || parseHeartRate(row.hr_2) !== null
+  );
+}
+
+/** True when at least one matched segment is steep enough to have a VAM. */
+function hasVamData(matched) {
+  return (matched || []).some(row => [row.vam_1, row.vam_2].some(v => v && v !== 'N/A'));
 }
 
 /** True when at least one matched row carries a personal record. */
@@ -372,6 +461,12 @@ const SORT_ACCESSORS = {
   power_1: row => parsePower(row.power_1),
   power_2: row => parsePower(row.power_2),
   power_diff: row => row.power_diff_value,
+  hr_1: row => parseHeartRate(row.hr_1),
+  hr_2: row => parseHeartRate(row.hr_2),
+  hr_diff: row => row.hr_diff_value,
+  vam_1: row => parseFloat(row.vam_1),
+  vam_2: row => parseFloat(row.vam_2),
+  vam_diff: row => row.vam_diff_value,
   pr_time: row => row.pr_time_seconds,
   pr_diff: row => row.pr_diff_seconds
 };
@@ -460,6 +555,12 @@ if (typeof module !== 'undefined' && module.exports) {
     parsePower,
     parseDistance,
     formatPowerDiff,
+    formatSignedDiff,
+    parseHeartRate,
+    computeVam,
+    achievementLabel,
+    hasHeartRateData,
+    hasVamData,
     compareRates,
     segmentKey,
     compareSegmentLists,

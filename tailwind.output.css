@@ -266,6 +266,22 @@ body {
 .col-speed { width: 12%; }
 .col-diff { width: 10%; }
 .col-power { width: 10%; }
+.col-hr { width: 9%; }
+.col-vam { width: 10%; }
+
+/* Strava's medal on an effort (PR, 2nd, KOM…), next to its time. */
+.medal {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1rem;
+  color: #92400e;
+  background-color: #fde68a;
+  vertical-align: middle;
+}
 
 /* Segment distance, shown under the segment name. */
 .segment-distance {
