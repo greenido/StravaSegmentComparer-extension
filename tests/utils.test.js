@@ -14,7 +14,13 @@ import {
   hasPersonalRecords,
   summarizeComparison,
   sortMatched,
-  applyPersonalRecords
+  applyPersonalRecords,
+  parseHeartRate,
+  computeVam,
+  achievementLabel,
+  hasHeartRateData,
+  hasVamData,
+  rankSharedActivities
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -403,5 +409,150 @@ describe('applyPersonalRecords', () => {
     expect(hasPersonalRecords(matched)).toBe(false);
     expect(hasPersonalRecords(applyPersonalRecords(matched, { 1: { time: '5:00' } }))).toBe(true);
     expect(hasPersonalRecords(applyPersonalRecords(matched, {}))).toBe(false);
+  });
+});
+
+describe('parseHeartRate', () => {
+  it('reads beats per minute with or without a space', () => {
+    expect(parseHeartRate('121 bpm')).toBe(121);
+    expect(parseHeartRate('121bpm')).toBe(121);
+  });
+
+  it('returns null when there is no reading', () => {
+    expect(parseHeartRate(null)).toBeNull();
+    expect(parseHeartRate('N/A')).toBeNull();
+  });
+});
+
+describe('computeVam', () => {
+  it('is metres climbed per hour: distance x grade / time', () => {
+    // 1 km at 8% is 80 m of climbing; in 6 minutes that is 800 m/h.
+    expect(computeVam('1.00 km', 8, '6:00')).toBeCloseTo(800);
+  });
+
+  it('works in miles', () => {
+    expect(computeVam('1 mi', 5, '10:00')).toBeCloseTo(482.8, 1);
+  });
+
+  it('is left out below a 3% average grade, where it means nothing', () => {
+    expect(computeVam('5.00 km', 2.9, '8:00')).toBeNull();
+  });
+
+  it('needs a distance, a grade and a time', () => {
+    expect(computeVam(null, 8, '6:00')).toBeNull();
+    expect(computeVam('1.00 km', null, '6:00')).toBeNull();
+    expect(computeVam('1.00 km', 8, 'N/A')).toBeNull();
+  });
+});
+
+describe('achievementLabel', () => {
+  it("shortens Strava's personal-best medals", () => {
+    expect(achievementLabel({ sprite: 'icon-at-pr-1', description: 'Personal Record' })).toEqual({
+      label: 'PR',
+      description: 'Personal Record'
+    });
+    expect(achievementLabel({ sprite: 'icon-at-pr-2', description: null }).label).toBe('2nd');
+    expect(achievementLabel({ sprite: 'icon-at-pr-3', description: null }).label).toBe('3rd');
+  });
+
+  it("falls back to Strava's own wording for any other medal", () => {
+    expect(achievementLabel({ sprite: 'icon-at-kom-1', description: 'KOM' })).toEqual({
+      label: 'KOM',
+      description: 'KOM'
+    });
+  });
+
+  it('returns null when there is nothing to show', () => {
+    expect(achievementLabel(null)).toBeNull();
+    expect(achievementLabel({ sprite: 'icon-at-unknown', description: null })).toBeNull();
+  });
+});
+
+describe('compareSegmentLists heart rate, VAM, grade and medals', () => {
+  const climb = overrides => ({
+    segmentId: '1',
+    name: 'Ridge Road',
+    distance: '1.00 km',
+    grade: 8,
+    time: '6:00',
+    heartRate: '150 bpm',
+    ...overrides
+  });
+
+  const compare = (a, b) => compareSegmentLists([climb(a)], [climb(b)]).matched[0];
+
+  it('compares heart rate', () => {
+    const row = compare({}, { heartRate: '145 bpm' });
+    expect(row).toMatchObject({ hr_1: '150 bpm', hr_2: '145 bpm', hr_diff: '-5 bpm', hr_diff_value: -5 });
+  });
+
+  it('compares VAM, each from its own time on the shared climb', () => {
+    const row = compare({}, { time: '5:00' });
+    expect(row).toMatchObject({ vam_1: '800 m/h', vam_2: '960 m/h', vam_diff: '+160 m/h', vam_diff_value: 160 });
+  });
+
+  it('carries the grade and each effort\'s medal', () => {
+    const row = compare({ achievement: { sprite: 'icon-at-pr-1', description: null } }, {});
+    expect(row.grade).toBe(8);
+    expect(row.achievement_1).toEqual({ label: 'PR', description: null });
+    expect(row.achievement_2).toBeNull();
+  });
+
+  it('marks what it cannot compare as N/A', () => {
+    const row = compare({ heartRate: null, grade: 1 }, {});
+    expect(row).toMatchObject({ hr_1: 'N/A', hr_diff: 'N/A', hr_diff_value: null, vam_1: 'N/A', vam_diff: 'N/A' });
+  });
+});
+
+describe('hasHeartRateData and hasVamData', () => {
+  it('report whether any row has a reading', () => {
+    expect(hasHeartRateData([{ hr_1: 'N/A', hr_2: '140 bpm' }])).toBe(true);
+    expect(hasHeartRateData([{ hr_1: 'N/A', hr_2: 'N/A' }])).toBe(false);
+    expect(hasVamData([{ vam_1: '800 m/h', vam_2: 'N/A' }])).toBe(true);
+    expect(hasVamData([{}])).toBe(false);
+  });
+});
+
+describe('sorting the new columns', () => {
+  it('sorts by heart-rate and VAM difference', () => {
+    const rows = [
+      { name: 'a', hr_diff_value: 3, vam_diff_value: -20 },
+      { name: 'b', hr_diff_value: -8, vam_diff_value: 90 }
+    ];
+    expect(sortMatched(rows, 'hr_diff', 'asc').map(r => r.name)).toEqual(['b', 'a']);
+    expect(sortMatched(rows, 'vam_diff', 'desc').map(r => r.name)).toEqual(['b', 'a']);
+  });
+});
+
+describe('rankSharedActivities', () => {
+  const ride = (activityId, date, name = `Ride ${activityId}`) => ({ activityId, name, date });
+
+  const recentBySegmentId = {
+    s1: [ride('A', '2026-09-01'), ride('B', '2026-08-01'), ride('SELF', '2026-09-10')],
+    s2: [ride('A', '2026-09-01'), ride('C', '2026-09-05')],
+    s3: [ride('A', '2026-09-01'), ride('B', '2026-08-01')]
+  };
+
+  it('ranks your other activities by how many of the segments they share', () => {
+    expect(rankSharedActivities(['s1', 's2', 's3'], recentBySegmentId, 'SELF')).toEqual([
+      { activityId: 'A', name: 'Ride A', date: '2026-09-01', shared: 3 },
+      { activityId: 'B', name: 'Ride B', date: '2026-08-01', shared: 2 },
+      { activityId: 'C', name: 'Ride C', date: '2026-09-05', shared: 1 }
+    ]);
+  });
+
+  it('breaks ties with the most recent activity', () => {
+    const ranked = rankSharedActivities(['s2'], recentBySegmentId, 'SELF');
+    expect(ranked.map(a => a.activityId)).toEqual(['C', 'A']);
+  });
+
+  it('never suggests the activity being compared', () => {
+    const ids = rankSharedActivities(['s1'], recentBySegmentId, 'SELF').map(a => a.activityId);
+    expect(ids).not.toContain('SELF');
+  });
+
+  it('keeps the top few, and copes with segments it has no history for', () => {
+    expect(rankSharedActivities(['s1', 's2', 's3', 'nope'], recentBySegmentId, 'SELF', 2)).toHaveLength(2);
+    expect(rankSharedActivities(['nope'], recentBySegmentId, 'SELF')).toEqual([]);
   });
 });

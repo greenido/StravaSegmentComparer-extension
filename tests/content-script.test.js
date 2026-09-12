@@ -35,7 +35,7 @@ function stubFetch(routes) {
 }
 
 const send = request => new Promise(resolve => listener(request, {}, resolve));
-const fetchPr = segmentId => send({ action: 'fetchSegmentPr', segmentId });
+const fetchHistory = segmentId => send({ action: 'fetchSegmentHistory', segmentId });
 
 beforeEach(() => {
   globalThis.chrome = { runtime: { onMessage: { addListener: fn => (listener = fn) } } };
@@ -43,30 +43,54 @@ beforeEach(() => {
   (0, eval)(read('content-script.js'));
 });
 
-describe('fetchSegmentPr', () => {
+describe('fetchSegmentHistory', () => {
   const historyPath = '/athlete/segments/42/history';
 
   it('reads the PR from the effort history without loading the segment page', async () => {
     stubFetch({ [historyPath]: { json: { efforts: [{ elapsed_time: 800 }, { elapsed_time: 754 }] } } });
 
-    expect(await fetchPr('42')).toEqual({ ok: true, pr: { time: '12:34' } });
+    expect(await fetchHistory('42')).toEqual({ ok: true, pr: { time: '12:34' }, recent: [] });
     expect(requests.map(r => r.path)).toEqual([historyPath]);
     expect(requests[0].headers['X-Requested-With']).toBe('XMLHttpRequest');
+  });
+
+  it('returns your recent activities on the segment along with the PR', async () => {
+    stubFetch({
+      [historyPath]: {
+        json: {
+          efforts: [
+            { activity_id: 11, activity: { name: 'Tuesday loop' }, start_date_local: '2026-08-04T07:00:00Z', elapsed_time: 800 },
+            { activity_id: 12, activity: { name: 'Thursday loop' }, start_date_local: '2026-08-06T07:00:00Z', elapsed_time: 754 }
+          ]
+        }
+      }
+    });
+
+    expect(await fetchHistory('42')).toEqual({
+      ok: true,
+      pr: { time: '12:34' },
+      recent: [
+        { activityId: '12', name: 'Thursday loop', date: '2026-08-06T07:00:00Z' },
+        { activityId: '11', name: 'Tuesday loop', date: '2026-08-04T07:00:00Z' }
+      ]
+    });
   });
 
   it('trusts an empty history as "no PR" and does not ask again', async () => {
     stubFetch({ [historyPath]: { json: { efforts: [] } } });
 
-    expect(await fetchPr('42')).toEqual({ ok: true, pr: null });
+    expect(await fetchHistory('42')).toEqual({ ok: true, pr: null, recent: [] });
     expect(requests).toHaveLength(1);
   });
 
   it('falls back to the segment page when the history endpoint fails', async () => {
     stubFetch({ '/segments/42': { text: '<div data-testid="personal-record-time">12:34</div>' } });
 
-    expect(await fetchPr('42')).toEqual({
+    // The page gives a PR but not your activities, so `recent` is unknown.
+    expect(await fetchHistory('42')).toEqual({
       ok: true,
       pr: { time: '12:34' },
+      recent: null,
       historyError: 'Strava returned HTTP 404'
     });
     expect(requests.map(r => r.path)).toEqual([historyPath, '/segments/42']);
@@ -78,9 +102,10 @@ describe('fetchSegmentPr', () => {
       '/segments/42': { text: '<div data-testid="personal-record-time">12:34</div>' }
     });
 
-    expect(await fetchPr('42')).toEqual({
+    expect(await fetchHistory('42')).toEqual({
       ok: true,
       pr: { time: '12:34' },
+      recent: null,
       historyError: 'unrecognised response'
     });
   });
@@ -89,7 +114,7 @@ describe('fetchSegmentPr', () => {
     const login = { text: '<html>Log in</html>', redirectTo: 'https://www.strava.com/login' };
     stubFetch({ [historyPath]: login, '/segments/42': login });
 
-    const response = await fetchPr('42');
+    const response = await fetchHistory('42');
     expect(response.ok).toBe(false);
     expect(response.error).toMatch(/not signed in/);
   });
@@ -97,7 +122,7 @@ describe('fetchSegmentPr', () => {
   it('refuses to fetch anything but a numeric segment id', async () => {
     stubFetch({});
 
-    const response = await fetchPr('42/../../settings');
+    const response = await fetchHistory('42/../../settings');
     expect(response.ok).toBe(false);
     expect(response.error).toMatch(/Refusing/);
     expect(requests).toHaveLength(0);

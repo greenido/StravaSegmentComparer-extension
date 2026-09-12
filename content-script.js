@@ -8,9 +8,9 @@
  *   extractSegmentData  -> extract from this live page
  *   fetchActivityHtml   -> same-origin fetch of another activity, so the popup
  *                          can parse it without opening a tab
- *   fetchSegmentPr      -> same-origin fetch of your effort history on a
+ *   fetchSegmentHistory -> same-origin fetch of your effort history on a
  *                          segment (or, failing that, its page), reduced here
- *                          so only the PR crosses the message boundary
+ *                          to your PR and your recent activities there
  *
  * Depends on extractor.js, loaded first by the manifest.
  */
@@ -37,8 +37,10 @@ function waitForSegments(timeoutMs = SEGMENT_WAIT_TIMEOUT_MS) {
       resolve(found);
     };
 
+    // The efforts data was already checked above and does not arrive later,
+    // so from here on only the table is worth watching for.
     const observer = new MutationObserver(() => {
-      if (hasSegments(document)) finish(true);
+      if (findSegmentRows(document).length) finish(true);
     });
 
     const timer = setTimeout(() => finish(false), timeoutMs);
@@ -46,7 +48,7 @@ function waitForSegments(timeoutMs = SEGMENT_WAIT_TIMEOUT_MS) {
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
     // The table may have appeared between the initial check and observe().
-    if (hasSegments(document)) finish(true);
+    if (findSegmentRows(document).length) finish(true);
   });
 }
 
@@ -94,17 +96,18 @@ async function handleFetchActivityHtml(activityId) {
 }
 
 /**
- * The signed-in athlete's PR on a segment, reduced to one time value here so
- * a large response never has to cross the message boundary.
+ * The signed-in athlete's PR on a segment and their recent activities on it,
+ * reduced here so a large response never has to cross the message boundary.
  *
  * The effort history is JSON and exact, so it comes first. The segment page is
- * the fallback for when that endpoint fails or changes shape, and the reason
- * is passed back so the popup can log it. An empty history is an answer
- * ("no PR"), not a failure, so it does not trigger the fallback.
+ * the fallback for when that endpoint fails or changes shape; it has the PR
+ * but not the activities, so `recent` is null then, and the reason is passed
+ * back so the popup can log it. An empty history is an answer ("no PR"), not
+ * a failure, so it does not trigger the fallback.
  *
- * @returns {Promise<{pr: {time: string}|null, historyError?: string}>}
+ * @returns {Promise<{pr: {time: string}|null, recent: Array|null, historyError?: string}>}
  */
-async function handleFetchSegmentPr(segmentId) {
+async function handleFetchSegmentHistory(segmentId) {
   let historyError;
   try {
     const response = await fetchFromStrava(`/athlete/segments/${segmentId}/history`, {
@@ -112,7 +115,7 @@ async function handleFetchSegmentPr(segmentId) {
     });
     const history = await response.json();
     if (Array.isArray(history && history.efforts)) {
-      return { pr: personalRecordFromHistory(history) };
+      return { pr: personalRecordFromHistory(history), recent: recentActivitiesFromHistory(history) };
     }
     historyError = 'unrecognised response';
   } catch (error) {
@@ -122,7 +125,7 @@ async function handleFetchSegmentPr(segmentId) {
   // Validates the id again, so a refused id still fails here.
   const html = await (await fetchFromStrava(`/segments/${segmentId}`)).text();
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  return { pr: extractSegmentPersonalRecord(doc), historyError };
+  return { pr: extractSegmentPersonalRecord(doc), recent: null, historyError };
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -140,8 +143,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'fetchSegmentPr') {
-    handleFetchSegmentPr(request.segmentId)
+  if (request.action === 'fetchSegmentHistory') {
+    handleFetchSegmentHistory(request.segmentId)
       .then(result => sendResponse({ ok: true, ...result }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;

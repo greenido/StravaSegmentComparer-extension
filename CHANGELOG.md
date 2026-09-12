@@ -1,5 +1,51 @@
 # Changelog
 
+## Version 2.7 - Your rides, your heart rate
+
+### 🆕 New Features
+
+- **My Activities Here**: fill in activity 1 only and click it. It reads
+  activity 1's segments, looks up your effort history on each, and lists up to
+  five of your other activities that share the most of them, with date and
+  shared count. Click one to fill Activity 2 and compare. Works when activity 1
+  is a friend's ride, too: it finds your rides on the same segments
+- **Heart rate**: average HR per segment for both activities and the
+  difference, shown when either recorded it. The difference is deliberately
+  unshaded
+- **VAM**: metres climbed per hour on segments averaging 3% or steeper, computed
+  as distance × grade ÷ time (Strava fills in its own only for categorized
+  climbs), with a shaded difference
+- **Medals**: Strava's PR / 2nd / 3rd (and KOM) marker beside each effort's
+  time. Not exported, so the CSV's time column stays a plain time
+- **Grade** next to the distance under each segment name
+
+### 🐛 Fixes
+
+- **Runs could not be fetched**: Strava draws a run's segment table after the
+  page loads, so a fetched run had no segments and the extension fell back to
+  opening a tab. Segments are now read from Strava's inline efforts data, which
+  is in the HTML for rides and runs alike
+- **Stale Strava tabs**: after an extension update, open Strava tabs keep a
+  disconnected content script until reloaded. Using one as the fetch proxy
+  failed every PR lookup and cached the misses for a day; such tabs are now
+  skipped
+- Long table values no longer wrap onto two lines; the table scrolls sideways
+
+### 🔧 Technical Changes
+
+- `extractor.js` builds segments from the efforts data (raw times, heart rate,
+  power, grade and medals) and falls back to the table only when that data is
+  missing or has no times. Display strings are read as text through an inert
+  `<template>`
+- `hasSegments()` counts the efforts data as ready, so live pages no longer
+  wait for a table; the content script's `MutationObserver` watches rows only
+- The content script's `fetchSegmentPr` is now `fetchSegmentHistory` and also
+  returns your 20 most recent activities on the segment
+- One per-segment history cache (`segmentHistoryCache`) serves both "Compare vs
+  my PRs" and "My Activities Here"; 2.6's `prCache` is removed on the next write
+- The summary note now says that a segment inside another counts in both, which
+  stays the intended behaviour
+
 ## Version 2.6.1 - PRs that load
 
 ### 🐛 Fixes
