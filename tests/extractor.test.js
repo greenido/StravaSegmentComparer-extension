@@ -165,6 +165,12 @@ describe('segment ids on a real activity page', () => {
     expect(segments.map(s => s.segmentId)).toEqual([null, null]);
   });
 
+  it('uses the table, with the inline ids, when the efforts data carries no times', () => {
+    // The payloads above have no elapsed_time_raw, so the rows are read instead.
+    const segments = extractSegments(parse(bootstrap(payload) + rows), '1');
+    expect(segments.map(s => s.time)).toEqual(['52s', '29:03']);
+  });
+
   it('never mistakes an effort link for a segment id', () => {
     // /activities/{activity}/segments/{effort} is an effort page; its number is
     // an effort id, and fetching /segments/{that} would be a different segment.
@@ -177,6 +183,95 @@ describe('segment ids on a real activity page', () => {
       </tbody></table>`;
 
     expect(extractSegments(parse(html), '1')[0].segmentId).toBeNull();
+  });
+});
+
+describe('segments from Strava\'s efforts data', () => {
+  // One effort as Strava serves it: raw numbers alongside HTML display strings.
+  const effort = (overrides = {}) => ({
+    id: '9000000000000000001',
+    segment_id: 111,
+    name: 'Harbor Sprint',
+    elapsed_time: "52<abbr class='unit' title='seconds'>s</abbr>",
+    elapsed_time_raw: 52,
+    avg_speed: "34.3<abbr class='unit' title='kilometers per hour'> km/h</abbr>",
+    distance: "0.49<abbr class='unit' title='kilometers'> km</abbr>",
+    avg_watts_raw: 130.94,
+    avg_hr: '121',
+    avg_hr_raw: 120.98,
+    avg_grade_raw: 9.68,
+    achievement_sprite_name: null,
+    achievement_description: null,
+    ...overrides
+  });
+
+  const page = (efforts, extra = {}) =>
+    parse(`<script>pageView.segmentEfforts().reset(${JSON.stringify({ efforts, ...extra })}, { parse: true });</script>`);
+
+  it('builds each segment from the raw numbers, without needing a table', () => {
+    const [segment] = extractSegments(page([effort()]), '12345');
+
+    expect(segment).toMatchObject({
+      segmentId: '111',
+      effortId: '9000000000000000001',
+      occurrence: 0,
+      name: 'Harbor Sprint',
+      link: 'https://www.strava.com/activities/12345/segments/9000000000000000001',
+      time: '0:52',
+      rate: '34.3 km/h',
+      distance: '0.49 km',
+      power: '131 W',
+      heartRate: '121 bpm',
+      grade: 9.68,
+      achievement: null
+    });
+  });
+
+  it('reads a run, whose segment table Strava draws only after the page loads', () => {
+    // Fetched run pages have no segment rows at all, only this data.
+    const run = effort({
+      avg_speed: "6:23<abbr class='unit' title='minutes per kilometer'> /km</abbr>",
+      avg_watts_raw: null,
+      elapsed_time_raw: 379
+    });
+
+    const doc = page([run]);
+    expect(hasSegments(doc)).toBe(true);
+    expect(extractActivityData(doc, 'https://www.strava.com/activities/1').segments[0]).toMatchObject({
+      time: '6:19',
+      rate: '6:23 /km',
+      power: null
+    });
+  });
+
+  it('leaves heart rate empty when the effort recorded none', () => {
+    // Strava sends "0" as the display value and null as the raw one.
+    const [segment] = extractSegments(page([effort({ avg_hr: '0', avg_hr_raw: null })]), '1');
+    expect(segment.heartRate).toBeNull();
+  });
+
+  it("keeps Strava's medal for the effort", () => {
+    const medal = effort({ achievement_sprite_name: 'icon-at-pr-2', achievement_description: '2nd fastest time' });
+    expect(extractSegments(page([medal]), '1')[0].achievement).toEqual({
+      sprite: 'icon-at-pr-2',
+      description: '2nd fastest time'
+    });
+  });
+
+  it('numbers laps and leaves hidden efforts out, as the table does', () => {
+    const efforts = [
+      effort({ id: '1', elapsed_time_raw: 50 }),
+      effort({ id: '2', elapsed_time_raw: 48 })
+    ];
+    const segments = extractSegments(page(efforts, { hidden_efforts: [effort({ id: '3', segment_id: 999 })] }), '1');
+
+    expect(segments.map(s => [s.effortId, s.occurrence])).toEqual([['1', 0], ['2', 1]]);
+  });
+
+  it('reads markup in a display string as text, never as HTML', () => {
+    const hostile = effort({ distance: '<img src=x onerror="globalThis.pwnedExtractor = true">1.0 km' });
+    expect(extractSegments(page([hostile]), '1')[0].distance).toBe('1.0 km');
+    expect(globalThis.pwnedExtractor).toBeUndefined();
   });
 });
 

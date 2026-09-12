@@ -265,51 +265,118 @@ function jsonObjectAt(text, start) {
 }
 
 /**
- * Map each segment effort id on the page to its segment id.
+ * Strava's own data for the page's segment efforts, or null.
  *
- * Strava's segment rows carry only `data-segment-effort-id`. The segment id is
- * in the inline script that seeds the page's efforts collection:
+ * It is in the inline script that seeds the page's efforts collection:
  *
  *   pageView.segmentEfforts().reset({"efforts":[{"id":"…","segment_id":123,…}],
  *                                    "hidden_efforts":[…]}, { parse: true });
  *
- * A DOMParser document never runs its scripts, but their text is still there,
- * so this works on fetched HTML as well as on the live page.
+ * `efforts` are the rows of the visible table, in the same order, and carry
+ * raw numbers (`elapsed_time_raw`, `avg_hr_raw`, …) next to HTML display
+ * strings. A DOMParser document never runs its scripts, but their text is still
+ * there, so this works on fetched HTML as well as on the live page — including
+ * runs, whose segment table is only drawn after the page loads.
  */
-function extractSegmentIdsByEffortId(doc) {
-  const ids = new Map();
-
+function readEffortsData(doc) {
   for (const script of doc.querySelectorAll('script:not([src])')) {
     const text = script.textContent || '';
     const call = /segmentEfforts\(\)\.reset\(\s*/.exec(text);
     if (!call) continue;
 
     const data = jsonObjectAt(text, call.index + call[0].length);
-    if (!data) continue;
-
-    [...(data.efforts || []), ...(data.hidden_efforts || [])].forEach(effort => {
-      if (effort && effort.id != null && effort.segment_id != null) {
-        ids.set(String(effort.id), String(effort.segment_id));
-      }
-    });
+    if (data) return data;
   }
+  return null;
+}
 
+// Effort id -> segment id, for reading the table when the data has no times.
+function segmentIdsByEffortId(data) {
+  const ids = new Map();
+  [...((data && data.efforts) || []), ...((data && data.hidden_efforts) || [])].forEach(effort => {
+    if (effort && effort.id != null && effort.segment_id != null) {
+      ids.set(String(effort.id), String(effort.segment_id));
+    }
+  });
   return ids;
 }
 
+// Text of one of Strava's HTML display strings ("34.3<abbr …> km/h</abbr>").
+// A template's content is inert, so nothing in the string can run or load.
+function htmlText(doc, html) {
+  if (typeof html !== 'string' || !html) return null;
+  const template = doc.createElement('template');
+  template.innerHTML = html;
+  return template.content.textContent.replace(/\s+/g, ' ').trim() || null;
+}
+
+const isNumber = value => typeof value === 'number' && Number.isFinite(value);
+
+function segmentFromEffort(doc, effort, index, activityId) {
+  if (!effort || effort.id == null) return null;
+
+  const effortId = String(effort.id);
+  const time = isNumber(effort.elapsed_time_raw)
+    ? clockTime(Math.round(effort.elapsed_time_raw))
+    : htmlText(doc, effort.elapsed_time);
+
+  return {
+    segmentId: effort.segment_id != null ? String(effort.segment_id) : null,
+    effortId,
+    name: (typeof effort.name === 'string' && effort.name.trim()) || `Segment ${index + 1}`,
+    link: `https://www.strava.com/activities/${activityId}/segments/${effortId}`,
+    time,
+    rate: htmlText(doc, effort.avg_speed),
+    distance: htmlText(doc, effort.distance),
+    power: isNumber(effort.avg_watts_raw) ? `${Math.round(effort.avg_watts_raw)} W` : null,
+    // No heart rate comes through as a display "0" with a null raw value.
+    heartRate: isNumber(effort.avg_hr_raw) && effort.avg_hr_raw > 0 ? `${Math.round(effort.avg_hr_raw)} bpm` : null,
+    grade: isNumber(effort.avg_grade_raw) ? effort.avg_grade_raw : null,
+    achievement:
+      effort.achievement_sprite_name || effort.achievement_description
+        ? { sprite: effort.achievement_sprite_name || null, description: effort.achievement_description || null }
+        : null,
+    index
+  };
+}
+
+// Same segment ridden twice in one activity gets occurrence 0, 1, ...
+function numberOccurrences(segments) {
+  const occurrences = new Map();
+  return segments.map(segment => {
+    const key = segment.segmentId || segment.name;
+    const occurrence = occurrences.get(key) || 0;
+    occurrences.set(key, occurrence + 1);
+    return { ...segment, occurrence };
+  });
+}
+
 /**
- * Extract one segment effort per row.
+ * One segment effort per row of the activity's segment table.
+ *
+ * Strava's efforts data is preferred: it is exact, the same in every language
+ * and unit system, and present even when the table is not. The table is read
+ * only when that data is missing or has no times.
  *
  * `segmentId` (the segment itself) is what identifies a segment across two
  * activities; `effortId` is unique per activity and only used to build links.
  */
 function extractSegments(doc, activityId) {
-  const rows = findSegmentRows(doc);
-  if (!rows.length) return [];
+  const data = readEffortsData(doc);
+  const efforts = (data && data.efforts) || [];
 
-  const segmentIdsByEffortId = extractSegmentIdsByEffortId(doc);
+  if (efforts.some(effort => effort && isNumber(effort.elapsed_time_raw))) {
+    return numberOccurrences(
+      efforts.map((effort, index) => segmentFromEffort(doc, effort, index, activityId)).filter(Boolean)
+    );
+  }
+
+  return numberOccurrences(segmentsFromRows(doc, activityId, segmentIdsByEffortId(data)));
+}
+
+function segmentsFromRows(doc, activityId, segmentIdsByEffortId) {
+  const rows = findSegmentRows(doc);
   const segments = [];
-  const occurrences = new Map();
 
   rows.forEach((row, index) => {
     try {
@@ -347,15 +414,11 @@ function extractSegments(doc, activityId) {
         ? `https://www.strava.com/activities/${activityId}/segments/${effortId}`
         : `https://www.strava.com/segments/${segmentId}`;
 
-      // Same segment ridden twice in one activity gets occurrence 0, 1, ...
-      const key = segmentId || name;
-      const occurrence = occurrences.get(key) || 0;
-      occurrences.set(key, occurrence + 1);
+      const grade = cellMatching(row, /^-?\d+(?:[.,]\d+)?\s*%$/, '.stats span');
 
       segments.push({
         segmentId,
         effortId,
-        occurrence,
         name,
         link,
         time,
@@ -372,6 +435,9 @@ function extractSegments(doc, activityId) {
           firstMatch(row, ['.power', '[data-testid="segment-power"]']) ||
           cellMatching(row, /^\d+(?:[.,]\d+)?\s*W$/i) ||
           null,
+        heartRate: cellMatching(row, /^\d+\s*bpm$/i),
+        grade: grade === null ? null : parseFloat(grade.replace(',', '.')),
+        achievement: null,
         index
       });
     } catch (_) {
@@ -405,9 +471,12 @@ function extractActivityData(doc, url) {
   };
 }
 
-// Cheap readiness probe used while waiting for a background tab to render.
+// Readiness probe: the efforts data is in the page from the start, the table
+// may only be drawn later.
 function hasSegments(doc) {
-  return findSegmentRows(doc).length > 0;
+  if (findSegmentRows(doc).length > 0) return true;
+  const data = readEffortsData(doc);
+  return Boolean(data && data.efforts && data.efforts.length);
 }
 
 /* ------------------------------------------------------------------ *

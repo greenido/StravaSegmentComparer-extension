@@ -37,8 +37,10 @@ function waitForSegments(timeoutMs = SEGMENT_WAIT_TIMEOUT_MS) {
       resolve(found);
     };
 
+    // The efforts data was already checked above and does not arrive later,
+    // so from here on only the table is worth watching for.
     const observer = new MutationObserver(() => {
-      if (hasSegments(document)) finish(true);
+      if (findSegmentRows(document).length) finish(true);
     });
 
     const timer = setTimeout(() => finish(false), timeoutMs);
@@ -46,7 +48,7 @@ function waitForSegments(timeoutMs = SEGMENT_WAIT_TIMEOUT_MS) {
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
     // The table may have appeared between the initial check and observe().
-    if (hasSegments(document)) finish(true);
+    if (findSegmentRows(document).length) finish(true);
   });
 }
 
