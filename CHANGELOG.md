@@ -1,5 +1,37 @@
 # Changelog
 
+## Version 2.6.1 - PRs that load
+
+### 🐛 Fixes
+
+- **Compare vs my PRs always failed** with "These segments have no Strava
+  segment id". The extractor looked for a `/segments/{id}` link in each row,
+  which existed only in the test fixtures: Strava's rows carry just
+  `data-segment-effort-id`. Segment ids are now read from the inline script
+  that seeds the page's efforts list (`pageView.segmentEfforts().reset(…)`),
+  which is present on the live page and in fetched HTML alike
+- **Segments now really match by id**, as the README already claimed. Before
+  this they silently fell back to matching by name, so a renamed segment did
+  not pair up
+- **PRs come from your effort history** (`/athlete/segments/{id}/history`,
+  JSON) instead of scraping the segment page, which is now only the fallback.
+  When the fallback is used, the activity log says so once, with the reason
+- **Segment distance** under each name was always blank on real pages: it lives
+  in the stats line under the name, not in its own cell
+- An effort link (`/activities/{a}/segments/{effort}`) could be read as a
+  segment id, which would have fetched the PR of an unrelated segment
+- "Found your PR for N of M segments" counted laps in N but not in M
+- A comparison saved by 2.6 has no segment ids; the PR button now says to run
+  the comparison again instead of reporting a dead end
+
+### 🔧 Technical Changes
+
+- `content-script.js` fetches through one allowlist of paths, and its
+  signed-out check compares the final URL's path instead of pattern-matching
+  the whole URL, query string included
+- New `tests/content-script.test.js` covers the history-then-page fallback,
+  signed-out handling and the path allowlist
+
 ## Version 2.6 - Where the time went
 
 ### 🆕 New Features

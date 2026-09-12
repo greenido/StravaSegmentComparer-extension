@@ -65,18 +65,23 @@ is activity 1’s page order, which is the order you rode them.
 ### Compare vs my PRs
 
 “Compare vs my PRs” adds two columns: your personal record on each segment, and
-how far activity 1 was off it. A negative value means that effort *was* the PR.
+how far activity 1 was off it. The PR is your all-time best, so if activity 1
+is your own PR ride it shows `0:00`; a negative value means activity 1 beat
+your PR.
 
 Some caveats worth knowing:
 
 - The PR is **yours**, as the signed-in Strava athlete. It is only meaningful
   when one of the two activities is yours
+- It is read from your effort history on each segment
+  (`/athlete/segments/{id}/history`, the JSON Strava’s own site uses), and the
+  PR is your fastest elapsed time there. If that endpoint fails, the segment’s
+  page is read instead, and the activity log says so and why
 - Strava has no bulk PR endpoint, so this is one request per segment. It is
   capped at 60 segments per click, runs three at a time, and caches results for
   24 hours. `Clear` does not empty the PR cache
 - Segments where the PR cannot be read show `N/A`. That means "unknown", not
-  "no PR" — Strava’s markup for this panel changes, and this reads it rather
-  than guessing
+  "no PR" — this reads what Strava serves rather than guessing
 
 ### Export
 
@@ -105,7 +110,8 @@ back automatically when a route fails:
 Files:
 
 - `extractor.js`: all DOM reading. Every function takes an explicit `Document`, so the same code runs against a live page or against fetched HTML
-- `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or fetch and parse a segment page for its PR. It waits for the segments table with a `MutationObserver` instead of a fixed sleep
+- `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or look up your PR on a segment (effort history first, segment page as the fallback). It only fetches from an allowlist of paths, and waits for the segments table with a `MutationObserver` instead of a fixed sleep
+- Segment ids come from the inline script that seeds Strava’s efforts list (`pageView.segmentEfforts().reset(…)`), keyed by each row’s `data-segment-effort-id`; the rows themselves carry no segment link
 - `popup.js`: tab detection, route selection, comparison, rendering, CSV export. The table's columns are declared once in `COLUMNS`, which drives the headers, the cells and the CSV together
 - `utils.js`: pure parsing and comparison helpers (times, speeds, paces, power, distances, segment matching, sorting, summary)
 - `background.js`: minimal MV3 service worker
@@ -152,6 +158,8 @@ Project structure (selected):
 - “Redirected away from the activity page”: You’re signed out, or the activity is private. Open it in a tab and compare again
 - Athlete names missing or “unknown”: Not all pages expose the same metadata; this is expected sometimes
 - “No personal records found”: You are either not signed in, or signed in as an athlete who has not ridden these segments. The PR columns stay hidden rather than filling with N/A
+- “No Strava segment ids in this comparison”: The comparison was saved by 2.6, which could not read segment ids. Click “Compare Activities” again, then retry
+- “Effort history unavailable … read their segment pages instead” in the log: Strava refused or changed the history endpoint, so PRs came from the slower, less reliable segment page. The message includes the first error
 - Power columns missing: Neither activity recorded power, or Strava served markup this version does not recognise. Runs never show them
 - If the popup shows stale data, click “Clear” to reset and re-run the comparison
 - The activity log in the popup names the route used for each activity, which is the fastest way to see where a comparison went wrong

@@ -229,12 +229,72 @@ function firstMatch(row, selectors) {
 }
 
 // Find a cell whose text matches `re`, for markup where classes tell us nothing.
-function cellMatching(row, re) {
-  for (const cell of row.querySelectorAll('td')) {
+function cellMatching(row, re, selector = 'td') {
+  for (const cell of row.querySelectorAll(selector)) {
     const text = cell.textContent.trim();
     if (re.test(text)) return text;
   }
   return null;
+}
+
+// Parse the JSON object that opens at `start`, found by matching braces
+// outside of strings. Returns null if there is no complete, valid object.
+function jsonObjectAt(text, start) {
+  if (text[start] !== '{') return null;
+
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}' && --depth === 0) {
+      try {
+        return JSON.parse(text.slice(start, i + 1));
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Map each segment effort id on the page to its segment id.
+ *
+ * Strava's segment rows carry only `data-segment-effort-id`. The segment id is
+ * in the inline script that seeds the page's efforts collection:
+ *
+ *   pageView.segmentEfforts().reset({"efforts":[{"id":"…","segment_id":123,…}],
+ *                                    "hidden_efforts":[…]}, { parse: true });
+ *
+ * A DOMParser document never runs its scripts, but their text is still there,
+ * so this works on fetched HTML as well as on the live page.
+ */
+function extractSegmentIdsByEffortId(doc) {
+  const ids = new Map();
+
+  for (const script of doc.querySelectorAll('script:not([src])')) {
+    const text = script.textContent || '';
+    const call = /segmentEfforts\(\)\.reset\(\s*/.exec(text);
+    if (!call) continue;
+
+    const data = jsonObjectAt(text, call.index + call[0].length);
+    if (!data) continue;
+
+    [...(data.efforts || []), ...(data.hidden_efforts || [])].forEach(effort => {
+      if (effort && effort.id != null && effort.segment_id != null) {
+        ids.set(String(effort.id), String(effort.segment_id));
+      }
+    });
+  }
+
+  return ids;
 }
 
 /**
@@ -247,6 +307,7 @@ function extractSegments(doc, activityId) {
   const rows = findSegmentRows(doc);
   if (!rows.length) return [];
 
+  const segmentIdsByEffortId = extractSegmentIdsByEffortId(doc);
   const segments = [];
   const occurrences = new Map();
 
@@ -254,9 +315,16 @@ function extractSegments(doc, activityId) {
     try {
       const effortId = row.getAttribute('data-segment-effort-id');
 
+      // Only a link to the segment itself counts: /activities/{a}/segments/{n}
+      // is an effort page, and its number is an effort id.
       const segmentHref =
-        row.querySelector('a[href*="/segments/"]')?.getAttribute('href') || '';
-      const segmentId = (segmentHref.match(/\/segments\/(\d+)/) || [])[1] || null;
+        row
+          .querySelector('a[href^="/segments/"], a[href^="https://www.strava.com/segments/"]')
+          ?.getAttribute('href') || '';
+      const segmentId =
+        (effortId && segmentIdsByEffortId.get(effortId)) ||
+        (segmentHref.match(/\/segments\/(\d+)/) || [])[1] ||
+        null;
 
       const name =
         firstMatch(row, ['.name', '.segment-name', '[data-testid="segment-name"]', 'a']) ||
@@ -293,10 +361,12 @@ function extractSegments(doc, activityId) {
         time,
         rate: speedOrPace,
         // Distance falls back to km/mi only: elevation is the other m/ft
-        // column in the same row and would otherwise be picked up here.
+        // value in the same row and would otherwise be picked up here. On
+        // Strava's page it sits in the stats line under the segment name,
+        // whose labels are localized, so the value is matched by its unit.
         distance:
           firstMatch(row, ['.distance', '[data-testid="segment-distance"]']) ||
-          cellMatching(row, /^\d+(?:[.,]\d+)?\s*(km|mi)$/i) ||
+          cellMatching(row, /^\d+(?:[.,]\d+)?\s*(km|mi)$/i, 'td, .stats span') ||
           null,
         power:
           firstMatch(row, ['.power', '[data-testid="segment-power"]']) ||
@@ -411,6 +481,30 @@ function extractSegmentPersonalRecord(doc) {
   return null;
 }
 
+function clockTime(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+    : `${minutes}:${seconds}`;
+}
+
+/**
+ * The signed-in athlete's PR from `GET /athlete/segments/{id}/history`, which
+ * lists their efforts on the segment with `elapsed_time` in whole seconds.
+ * Strava ranks efforts by elapsed time, so the PR is simply the fastest one.
+ *
+ * @returns {{time: string}|null} null when there is no usable effort
+ */
+function personalRecordFromHistory(history) {
+  const times = ((history && history.efforts) || [])
+    .map(effort => effort && effort.elapsed_time)
+    .filter(time => Number.isInteger(time) && time > 0);
+
+  return times.length ? { time: clockTime(Math.min(...times)) } : null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractActivityId,
@@ -419,6 +513,7 @@ if (typeof module !== 'undefined' && module.exports) {
     extractSegments,
     extractActivityData,
     extractSegmentPersonalRecord,
+    personalRecordFromHistory,
     hasSegments
   };
 }
