@@ -8,6 +8,7 @@ import {
   extractActivityData,
   extractSegmentPersonalRecord,
   personalRecordFromHistory,
+  recentActivitiesFromHistory,
   hasSegments
 } from '../extractor.js';
 
@@ -441,6 +442,55 @@ describe('personalRecordFromHistory', () => {
   it('returns null when the athlete has no efforts on the segment', () => {
     expect(personalRecordFromHistory({ efforts: [] })).toBeNull();
     expect(personalRecordFromHistory(null)).toBeNull();
+  });
+});
+
+describe('recentActivitiesFromHistory', () => {
+  const effort = (activityId, date, name = `Ride ${activityId}`) => ({
+    activity_id: activityId,
+    activity: { name },
+    start_date_local: date,
+    elapsed_time: 300
+  });
+
+  it('lists the activities newest first, one entry per activity', () => {
+    const history = {
+      // Strava sends them oldest first.
+      efforts: [
+        effort(1, '2026-06-01T08:00:00Z'),
+        effort(2, '2026-07-01T08:00:00Z'),
+        effort(2, '2026-07-01T08:30:00Z'),
+        effort(3, '2026-08-01T08:00:00Z')
+      ]
+    };
+
+    expect(recentActivitiesFromHistory(history)).toEqual([
+      { activityId: '3', name: 'Ride 3', date: '2026-08-01T08:00:00Z' },
+      { activityId: '2', name: 'Ride 2', date: '2026-07-01T08:30:00Z' },
+      { activityId: '1', name: 'Ride 1', date: '2026-06-01T08:00:00Z' }
+    ]);
+  });
+
+  it('keeps only the most recent ones', () => {
+    const efforts = Array.from({ length: 30 }, (_, i) => effort(i + 1, `2026-01-${String(i + 1).padStart(2, '0')}`));
+    const recent = recentActivitiesFromHistory({ efforts });
+
+    expect(recent).toHaveLength(20);
+    expect(recent[0].activityId).toBe('30');
+  });
+
+  it('accepts the activity id nested in the activity, and skips efforts with neither', () => {
+    const history = {
+      efforts: [{ activity: { id: 7, name: 'Nested' }, start_date: '2026-01-01' }, { elapsed_time: 90 }]
+    };
+    expect(recentActivitiesFromHistory(history)).toEqual([
+      { activityId: '7', name: 'Nested', date: '2026-01-01' }
+    ]);
+  });
+
+  it('falls back to the order Strava sent when dates are missing', () => {
+    const history = { efforts: [{ activity_id: 1 }, { activity_id: 2 }] };
+    expect(recentActivitiesFromHistory(history).map(a => a.activityId)).toEqual(['2', '1']);
   });
 });
 

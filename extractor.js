@@ -574,6 +574,51 @@ function personalRecordFromHistory(history) {
   return times.length ? { time: clockTime(Math.min(...times)) } : null;
 }
 
+// Enough to find "my recent rides here" without storing a commute segment's
+// entire history.
+const HISTORY_RECENT_LIMIT = 20;
+
+/**
+ * The signed-in athlete's most recent activities on a segment, newest first
+ * and one entry per activity, from the same history as the PR.
+ *
+ * Strava sends efforts oldest first, so when dates are missing the later ones
+ * are taken to be the newer ones.
+ *
+ * @returns {Array<{activityId: string, name: string|null, date: string|null}>}
+ */
+function recentActivitiesFromHistory(history) {
+  const efforts = ((history && history.efforts) || [])
+    .map((effort, index) => {
+      const activityId = effort && (effort.activity_id ?? (effort.activity && effort.activity.id));
+      if (activityId === null || activityId === undefined) return null;
+
+      const date = effort.start_date_local || effort.start_date || null;
+      const time = Date.parse(date || '');
+      return {
+        index,
+        time: Number.isNaN(time) ? -Infinity : time,
+        activity: {
+          activityId: String(activityId),
+          name: (effort.activity && effort.activity.name) || null,
+          date
+        }
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.time - a.time || b.index - a.index);
+
+  const seen = new Set();
+  const recent = [];
+  for (const { activity } of efforts) {
+    if (seen.has(activity.activityId)) continue;
+    seen.add(activity.activityId);
+    recent.push(activity);
+    if (recent.length === HISTORY_RECENT_LIMIT) break;
+  }
+  return recent;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractActivityId,
@@ -583,6 +628,7 @@ if (typeof module !== 'undefined' && module.exports) {
     extractActivityData,
     extractSegmentPersonalRecord,
     personalRecordFromHistory,
+    recentActivitiesFromHistory,
     hasSegments
   };
 }

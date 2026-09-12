@@ -544,6 +544,42 @@ function applyPersonalRecords(matched, prBySegmentId) {
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * "My activities here"
+ * ------------------------------------------------------------------ */
+
+/**
+ * Rank the signed-in athlete's other activities by how many of `segmentIds`
+ * they share, most recent first on a tie.
+ *
+ * @param {string[]} segmentIds  the segments of the activity being compared
+ * @param {Object} recentBySegmentId  segment id -> [{activityId, name, date}]
+ * @param {string} excludeActivityId  the activity being compared
+ * @returns {Array<{activityId: string, name: string|null, date: string|null, shared: number}>}
+ */
+function rankSharedActivities(segmentIds, recentBySegmentId, excludeActivityId, limit = 5) {
+  const byActivity = new Map();
+
+  (segmentIds || []).forEach(segmentId => {
+    ((recentBySegmentId || {})[segmentId] || []).forEach(({ activityId, name, date }) => {
+      if (!activityId || activityId === String(excludeActivityId)) return;
+
+      const entry = byActivity.get(activityId) || { activityId, name: null, date: null, segments: new Set() };
+      entry.name = entry.name || name || null;
+      entry.date = entry.date || date || null;
+      entry.segments.add(segmentId);
+      byActivity.set(activityId, entry);
+    });
+  });
+
+  const when = date => Date.parse(date || '') || 0;
+
+  return [...byActivity.values()]
+    .map(({ segments, ...activity }) => ({ ...activity, shared: segments.size }))
+    .sort((a, b) => b.shared - a.shared || when(b.date) - when(a.date))
+    .slice(0, limit);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     KM_PER_MILE,
@@ -571,6 +607,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rateSortValue,
     isSortable,
     sortMatched,
-    applyPersonalRecords
+    applyPersonalRecords,
+    rankSharedActivities
   };
 }

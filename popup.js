@@ -28,6 +28,8 @@ const prBtn = document.getElementById('prBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
+const myActivitiesBtn = document.getElementById('myActivitiesBtn');
+const myActivitiesSection = document.getElementById('myActivitiesSection');
 const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
 
@@ -53,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
   exportBtn.addEventListener('click', exportAsCSV);
   prBtn.addEventListener('click', loadPersonalRecords);
   autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
+  myActivitiesBtn.addEventListener('click', findMyActivities);
 
   helpBtn.addEventListener('click', e => {
     e.preventDefault();
@@ -298,10 +301,24 @@ async function fetchActivityData(activityId, openTabs, proxyTabId) {
   return extractViaNewTab(activityId);
 }
 
-/** Any strava.com tab can act as the fetch proxy. */
+/**
+ * Any strava.com tab whose content script answers can act as the fetch proxy.
+ *
+ * A tab opened before the extension was installed or updated is still showing
+ * Strava but has no live content script until it is reloaded. Using it anyway
+ * would fail every request, so it is skipped.
+ */
 async function findProxyTabId() {
   const tabs = await chrome.tabs.query({ url: 'https://www.strava.com/*' });
-  return tabs.length ? tabs[0].id : null;
+  for (const tab of tabs) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+      return tab.id;
+    } catch (_) {
+      // Try the next one.
+    }
+  }
+  return null;
 }
 
 /**
@@ -409,35 +426,99 @@ function saveComparison() {
 }
 
 /* ------------------------------------------------------------------ *
- * Personal records
+ * Your effort history
  *
- * Strava does not expose a PR endpoint we can call, so each segment's PR comes
- * from its own `/segments/{id}` page, fetched through a strava.com tab and
- * parsed there. That is one request per segment, so the work is capped, run at
- * a small concurrency, and cached for a day.
+ * Strava has no bulk endpoint for "my efforts on these segments", so each
+ * segment's history is one request, made through a strava.com tab and reduced
+ * there to your PR and your recent activities on it. The work is capped, run
+ * at a small concurrency and cached for a day, and the cache is shared by
+ * "Compare vs my PRs" and "My Activities Here", so either warms it for the
+ * other.
  * ------------------------------------------------------------------ */
 
-const PR_CACHE_KEY = 'prCache';
-const PR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const PR_FETCH_CONCURRENCY = 3;
-const PR_MAX_SEGMENTS = 60;
+const HISTORY_CACHE_KEY = 'segmentHistoryCache';
+// Where 2.6 kept PRs alone; cleared on the next write.
+const LEGACY_PR_CACHE_KEY = 'prCache';
+const HISTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const HISTORY_FETCH_CONCURRENCY = 3;
+const HISTORY_MAX_SEGMENTS = 60;
 // Breathing room between requests, so a 60-segment ride is a steady trickle
 // rather than a burst at Strava.
-const PR_FETCH_SPACING_MS = 250;
+const HISTORY_FETCH_SPACING_MS = 250;
 
-/** Read the PR cache, dropping entries older than the TTL. */
-async function readPrCache() {
-  const data = await chrome.storage.local.get(PR_CACHE_KEY);
-  const cached = data[PR_CACHE_KEY] || {};
+/** Read the history cache, dropping entries older than the TTL. */
+async function readHistoryCache() {
+  const data = await chrome.storage.local.get(HISTORY_CACHE_KEY);
+  const cached = data[HISTORY_CACHE_KEY] || {};
   const fresh = {};
 
   Object.entries(cached).forEach(([segmentId, entry]) => {
-    if (entry && Date.now() - (entry.fetchedAt || 0) < PR_CACHE_TTL_MS) {
+    if (entry && Date.now() - (entry.fetchedAt || 0) < HISTORY_CACHE_TTL_MS) {
       fresh[segmentId] = entry;
     }
   });
 
   return fresh;
+}
+
+/** Distinct segment ids, capped at what one click may look up. */
+function segmentIdsToLookUp(segments) {
+  const segmentIds = [...new Set(segments.map(segment => segment.segmentId).filter(Boolean))];
+  if (segmentIds.length > HISTORY_MAX_SEGMENTS) {
+    addLogEntry(`Looking up the first ${HISTORY_MAX_SEGMENTS} of ${segmentIds.length} segments`, 'warning');
+  }
+  return segmentIds.slice(0, HISTORY_MAX_SEGMENTS);
+}
+
+/**
+ * Your history on each of `segmentIds`: `{ pr, recent }` per segment, where
+ * `recent` is null if Strava's history could not be read for it.
+ */
+async function fetchSegmentHistories(segmentIds) {
+  const cache = await readHistoryCache();
+  const missing = segmentIds.filter(segmentId => !(segmentId in cache));
+  addLogEntry(`${segmentIds.length - missing.length} segment histories cached, ${missing.length} to fetch`, 'info');
+  if (!missing.length) return cache;
+
+  showStatus(`Reading your history on ${missing.length} segments...`, 'loading');
+  const historyErrors = [];
+
+  await withProxyTab(async tabId => {
+    let done = 0;
+
+    await mapWithLimit(missing, HISTORY_FETCH_CONCURRENCY, async segmentId => {
+      try {
+        const response = unwrap(
+          await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentHistory', segmentId })
+        );
+        if (response.historyError) historyErrors.push(response.historyError);
+        cache[segmentId] = { pr: response.pr || null, recent: response.recent || null, fetchedAt: Date.now() };
+      } catch (error) {
+        // Cache the miss too, so one bad segment is not retried on every click.
+        addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
+        cache[segmentId] = { pr: null, recent: null, fetchedAt: Date.now() };
+      }
+
+      done += 1;
+      if (done % 5 === 0 || done === missing.length) {
+        showStatus(`Read ${done}/${missing.length} segment histories...`, 'loading');
+      }
+      if (done < missing.length) await delay(HISTORY_FETCH_SPACING_MS);
+    });
+  });
+
+  // One line, not one per segment: it is almost always the same reason.
+  if (historyErrors.length) {
+    addLogEntry(
+      `Effort history unavailable for ${historyErrors.length} segment(s) (${historyErrors[0]}), ` +
+        'read their segment pages instead',
+      'warning'
+    );
+  }
+
+  await chrome.storage.local.set({ [HISTORY_CACHE_KEY]: cache });
+  await chrome.storage.local.remove(LEGACY_PR_CACHE_KEY);
+  return cache;
 }
 
 /**
@@ -453,66 +534,18 @@ async function loadPersonalRecords() {
     return;
   }
 
-  const segmentIds = [...new Set(comparison.matched.map(row => row.segmentId).filter(Boolean))];
-  if (!segmentIds.length) {
+  const wanted = segmentIdsToLookUp(comparison.matched);
+  if (!wanted.length) {
     // Most likely a comparison saved by a version that could not read segment
     // ids; re-reading the activities fixes it.
     showStatus('No Strava segment ids in this comparison — click "Compare Activities" again, then retry', 'error');
     return;
   }
 
-  const wanted = segmentIds.slice(0, PR_MAX_SEGMENTS);
-  if (wanted.length < segmentIds.length) {
-    addLogEntry(`Looking up the first ${PR_MAX_SEGMENTS} of ${segmentIds.length} segments`, 'warning');
-  }
-
   prBtn.disabled = true;
 
   try {
-    const cache = await readPrCache();
-    const missing = wanted.filter(segmentId => !(segmentId in cache));
-    addLogEntry(`${wanted.length - missing.length} PRs cached, ${missing.length} to fetch`, 'info');
-
-    if (missing.length) {
-      showStatus(`Fetching your PR for ${missing.length} segments...`, 'loading');
-
-      const historyErrors = [];
-
-      await withProxyTab(async tabId => {
-        let done = 0;
-
-        await mapWithLimit(missing, PR_FETCH_CONCURRENCY, async segmentId => {
-          try {
-            const response = unwrap(
-              await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentPr', segmentId })
-            );
-            if (response.historyError) historyErrors.push(response.historyError);
-            cache[segmentId] = { pr: response.pr || null, fetchedAt: Date.now() };
-          } catch (error) {
-            // Cache the miss too, so one bad segment is not retried on every click.
-            addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-            cache[segmentId] = { pr: null, fetchedAt: Date.now() };
-          }
-
-          done += 1;
-          if (done % 5 === 0 || done === missing.length) {
-            showStatus(`Fetched ${done}/${missing.length} personal records...`, 'loading');
-          }
-          if (done < missing.length) await delay(PR_FETCH_SPACING_MS);
-        });
-      });
-
-      // One line, not one per segment: it is almost always the same reason.
-      if (historyErrors.length) {
-        addLogEntry(
-          `Effort history unavailable for ${historyErrors.length} segment(s) (${historyErrors[0]}), ` +
-            'read their segment pages instead',
-          'warning'
-        );
-      }
-
-      await chrome.storage.local.set({ [PR_CACHE_KEY]: cache });
-    }
+    const cache = await fetchSegmentHistories(wanted);
 
     const prBySegmentId = {};
     Object.entries(cache).forEach(([segmentId, entry]) => {
@@ -539,6 +572,112 @@ async function loadPersonalRecords() {
   } finally {
     prBtn.disabled = false;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * My activities here
+ * ------------------------------------------------------------------ */
+
+const MY_ACTIVITIES_SHOWN = 5;
+
+/**
+ * Suggest your other activities on activity 1's segments, most shared first,
+ * so activity 2 can be picked instead of hunted for.
+ */
+async function findMyActivities() {
+  const activity1Url = activity1Input.value.trim();
+  if (!isValidStravaActivityUrl(activity1Url)) {
+    showStatus('Enter or auto-detect Activity 1 first', 'error');
+    return;
+  }
+  const activity1Id = extractActivityIdFromUrl(activity1Url);
+
+  myActivitiesBtn.disabled = true;
+  myActivitiesSection.classList.add('hidden');
+
+  try {
+    showStatus('Reading the segments of activity 1...', 'loading');
+    const openTabs = await findActivityTabs();
+    const activity = await fetchActivityData(activity1Id, openTabs, await findProxyTabId());
+
+    const segmentIds = segmentIdsToLookUp(activity.segments);
+    if (!segmentIds.length) {
+      showStatus('Activity 1 has no segments with a Strava id to look up', 'error');
+      return;
+    }
+
+    const cache = await fetchSegmentHistories(segmentIds);
+    const recentBySegmentId = {};
+    segmentIds.forEach(segmentId => {
+      if (cache[segmentId] && cache[segmentId].recent) recentBySegmentId[segmentId] = cache[segmentId].recent;
+    });
+
+    const candidates = rankSharedActivities(segmentIds, recentBySegmentId, activity1Id, MY_ACTIVITIES_SHOWN);
+    renderMyActivities(candidates, segmentIds.length);
+
+    if (candidates.length) {
+      showStatus(`Pick one of your activities to compare with activity 1`, 'success');
+    } else if (!Object.keys(recentBySegmentId).length) {
+      showStatus('Could not read your effort history on these segments — see the log', 'error');
+    } else {
+      showStatus('None of your other activities share these segments', 'info');
+    }
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+  } finally {
+    myActivitiesBtn.disabled = false;
+  }
+}
+
+function formatActivityDate(date) {
+  // Strava's local start time: the calendar date is the part that matters,
+  // and reading it as UTC could move it by a day.
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(date || '');
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+function renderMyActivities(candidates, segmentCount) {
+  myActivitiesSection.replaceChildren();
+  if (!candidates.length) return;
+
+  const heading = document.createElement('div');
+  heading.className = 'activity-options-heading';
+  heading.textContent = 'Your activities on these segments — pick one to compare:';
+  myActivitiesSection.appendChild(heading);
+
+  candidates.forEach(candidate => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'activity-option';
+
+    // Activity names are free text, so they only ever go in as text.
+    const name = document.createElement('span');
+    name.className = 'activity-option-name';
+    name.textContent = candidate.name || `Activity ${candidate.activityId}`;
+    option.appendChild(name);
+
+    const meta = document.createElement('span');
+    meta.className = 'activity-option-meta';
+    meta.textContent = [
+      formatActivityDate(candidate.date),
+      `${candidate.shared} of ${segmentCount} segments`
+    ].filter(Boolean).join(' · ');
+    option.appendChild(meta);
+
+    option.addEventListener('click', () => {
+      activity2Input.value = `https://www.strava.com/activities/${candidate.activityId}`;
+      compareActivities();
+    });
+
+    myActivitiesSection.appendChild(option);
+  });
+
+  myActivitiesSection.classList.remove('hidden');
 }
 
 /* ------------------------------------------------------------------ *

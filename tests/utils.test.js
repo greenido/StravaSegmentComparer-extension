@@ -19,7 +19,8 @@ import {
   computeVam,
   achievementLabel,
   hasHeartRateData,
-  hasVamData
+  hasVamData,
+  rankSharedActivities
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -520,5 +521,38 @@ describe('sorting the new columns', () => {
     ];
     expect(sortMatched(rows, 'hr_diff', 'asc').map(r => r.name)).toEqual(['b', 'a']);
     expect(sortMatched(rows, 'vam_diff', 'desc').map(r => r.name)).toEqual(['b', 'a']);
+  });
+});
+
+describe('rankSharedActivities', () => {
+  const ride = (activityId, date, name = `Ride ${activityId}`) => ({ activityId, name, date });
+
+  const recentBySegmentId = {
+    s1: [ride('A', '2026-09-01'), ride('B', '2026-08-01'), ride('SELF', '2026-09-10')],
+    s2: [ride('A', '2026-09-01'), ride('C', '2026-09-05')],
+    s3: [ride('A', '2026-09-01'), ride('B', '2026-08-01')]
+  };
+
+  it('ranks your other activities by how many of the segments they share', () => {
+    expect(rankSharedActivities(['s1', 's2', 's3'], recentBySegmentId, 'SELF')).toEqual([
+      { activityId: 'A', name: 'Ride A', date: '2026-09-01', shared: 3 },
+      { activityId: 'B', name: 'Ride B', date: '2026-08-01', shared: 2 },
+      { activityId: 'C', name: 'Ride C', date: '2026-09-05', shared: 1 }
+    ]);
+  });
+
+  it('breaks ties with the most recent activity', () => {
+    const ranked = rankSharedActivities(['s2'], recentBySegmentId, 'SELF');
+    expect(ranked.map(a => a.activityId)).toEqual(['C', 'A']);
+  });
+
+  it('never suggests the activity being compared', () => {
+    const ids = rankSharedActivities(['s1'], recentBySegmentId, 'SELF').map(a => a.activityId);
+    expect(ids).not.toContain('SELF');
+  });
+
+  it('keeps the top few, and copes with segments it has no history for', () => {
+    expect(rankSharedActivities(['s1', 's2', 's3', 'nope'], recentBySegmentId, 'SELF', 2)).toHaveLength(2);
+    expect(rankSharedActivities(['nope'], recentBySegmentId, 'SELF')).toEqual([]);
   });
 });
