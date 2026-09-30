@@ -485,6 +485,19 @@ describe('opening the comparison in a tab', () => {
   });
 });
 
+describe('the results toolbar', () => {
+  it('names each icon-only button, both aloud and in its tooltip', async () => {
+    await loadPopup();
+
+    ['exportBtn', 'prBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
+      const button = document.getElementById(id);
+      expect(button.textContent.trim()).toBe('');
+      expect(button.getAttribute('aria-label')).toBeTruthy();
+      expect(button.dataset.tooltip).toBe(button.getAttribute('aria-label'));
+    });
+  });
+});
+
 describe('filtering the table', () => {
   const names = () =>
     [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.children[0].textContent);

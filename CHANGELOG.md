@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Version 2.8 - Your history, your form
 
 ### 🆕 New Features
 
@@ -21,7 +21,11 @@
   the ride; the log says on each comparison whether it could
 - **Open in tab**: takes the comparison out of the 800px popup into a
   full-width tab. It is the same page reading the same saved comparison, so
-  nothing is fetched again
+  nothing is fetched again. Column headers wrap onto several lines, so the whole
+  table — all twenty columns — fits across a window about 1350px wide without
+  scrolling sideways
+- **Icon toolbar**: Export CSV, Compare vs my PRs, Open in tab and Clear are
+  spaced icon buttons, each named in its tooltip and to screen readers
 - **Filter by name**: narrows a long ride to the segments you are looking for,
   says how many of how many are showing, and the CSV follows what is on screen.
   The summary and the chart stay over the whole ride

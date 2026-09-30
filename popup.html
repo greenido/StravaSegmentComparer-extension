@@ -92,39 +92,40 @@
     <div id="status" class="status-message hidden"></div>
     
     <div id="results" class="card hidden">
-      <div class="flex justify-between items-center mb-3">
-        <div class="flex-1 mr-3">
+      <div class="flex justify-between items-center gap-4 mb-3">
+        <div class="flex-1">
           <label for="tableSearch" class="sr-only">Filter segments by name</label>
           <input type="search" id="tableSearch" placeholder="Filter segments..." class="input-field" aria-controls="segmentsTable">
           <div id="filterCount" class="filter-count hidden" aria-live="polite"></div>
         </div>
-    
-            <button id="exportBtn" title="Export data as CSV file" class="btn text-xs py-1 px-3" style="padding-right: 1em;">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+
+        <!-- Icon-only: the name is in the tooltip and read out via aria-label. -->
+        <div class="flex items-center gap-2">
+          <button id="exportBtn" type="button" class="btn btn-icon" aria-label="Export CSV" data-tooltip="Export CSV">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Export CSV
-            </button>
+          </button>
 
-          <button id="prBtn" title="Fetch your personal record for each segment from Strava" class="btn text-xs py-1 px-3 bg-blue-500 hover:bg-blue-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button id="prBtn" type="button" class="btn btn-icon bg-blue-500 hover:bg-blue-600" aria-label="Compare vs my PRs" data-tooltip="Compare vs my PRs">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
             </svg>
-            Compare vs my PRs
           </button>
 
-          <button id="openTabBtn" title="Open this comparison in a full browser tab" class="btn text-xs py-1 px-3 bg-blue-500 hover:bg-blue-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button id="openTabBtn" type="button" class="btn btn-icon bg-blue-500 hover:bg-blue-600" aria-label="Open in tab" data-tooltip="Open in tab">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
-            Open in tab
           </button>
 
-          <button id="clearBtn" class="btn text-xs py-1 px-3 bg-red-500 hover:bg-red-600 text-white">
-            Clear
+          <button id="clearBtn" type="button" class="btn btn-icon bg-red-500 hover:bg-red-600" aria-label="Clear results" data-tooltip="Clear results">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
           </button>
-
         </div>
+      </div>
 
       <div id="summarySection"></div>
 
