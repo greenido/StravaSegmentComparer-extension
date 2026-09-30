@@ -302,6 +302,106 @@ describe('the summary strip', () => {
   });
 });
 
+describe('segments inside other segments', () => {
+  const compare = async () => {
+    await loadPopup();
+
+    const segment = (id, name, time, span) => ({
+      segmentId: id,
+      occurrence: 0,
+      name,
+      link: 'https://www.strava.com/activities/1/segments/1',
+      time,
+      rate: '18.0 km/h',
+      span,
+      index: Number(id)
+    });
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: tabId === 10 ? '1' : '2',
+        athleteName: tabId === 10 ? 'Ada' : 'Ada, last spring',
+        activityStats: [],
+        segments:
+          tabId === 10
+            ? [
+                segment('1', 'Full lap', '20:00', { start: 0, end: 1200 }),
+                segment('2', 'The climb', '8:00', { start: 200, end: 680 }),
+                segment('3', 'Run home', '5:00', { start: 1300, end: 1600 })
+              ]
+            : [
+                segment('1', 'Full lap', '21:00', null),
+                segment('2', 'The climb', '8:30', null),
+                segment('3', 'Run home', '5:10', null)
+              ]
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  };
+
+  it('names the segment a nested one sits inside', async () => {
+    await compare();
+    expect(document.querySelector('.segment-nested').textContent).toBe('inside Full lap');
+  });
+
+  it('counts everything by default and recounts when the nested ones are left out', async () => {
+    await compare();
+
+    // +1:00 on the lap, +0:30 on the climb inside it, +0:10 on the run home.
+    expect(document.querySelector('.summary-net').textContent).toBe('+1:40');
+
+    const toggle = document.querySelector('.summary-toggle input');
+    expect(document.querySelector('.summary-toggle').textContent).toContain('1 segment inside another');
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+
+    expect(document.querySelector('.summary-net').textContent).toBe('+1:10');
+    expect(document.querySelector('.summary-counts').textContent).toContain('1 nested left out');
+    expect(document.querySelectorAll('.delta-chart .delta-bar')).toHaveLength(2);
+    // The table still shows the whole ride.
+    expect(document.querySelectorAll('#segmentsTableBody tr')).toHaveLength(3);
+  });
+
+  it('says in the log when Strava gave no positions to work from', async () => {
+    await loadPopup();
+    chrome.tabs.query = async () => [{ id: 10, url: 'https://www.strava.com/activities/1' }];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: '1',
+        athleteName: 'Ada',
+        activityStats: [],
+        segments: [1, 2].map(i => ({
+          segmentId: String(i),
+          occurrence: 0,
+          name: `Segment ${i}`,
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time: '5:00',
+          rate: '18.0 km/h',
+          span: null,
+          index: i
+        }))
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    expect(document.getElementById('logContent').textContent).toContain('carries no segment positions');
+    expect(document.querySelector('.summary-toggle')).toBeNull();
+  });
+});
+
 describe('sorting by a column header', () => {
   const clickHeader = label => {
     const th = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>

@@ -47,6 +47,10 @@ let rateLabel = 'Speed';
 // meaningful in its own right. Sorting is opt-in, by clicking a header.
 let sortState = { key: null, direction: 'desc' };
 
+// Whether the summary counts segments that sit inside other segments. A view
+// choice like the sort, so it is not saved with the comparison.
+let excludeNested = false;
+
 /* ------------------------------------------------------------------ *
  * Startup
  * ------------------------------------------------------------------ */
@@ -395,8 +399,10 @@ async function compareActivities() {
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
+    logNestingSupport(activity1Data.segments, comparison.matched);
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
+    excludeNested = false;
     lastStats = { stats1: activity1Data.activityStats, stats2: activity2Data.activityStats };
 
     if (!comparison.matched.length) {
@@ -415,6 +421,34 @@ async function compareActivities() {
   } finally {
     compareBtn.disabled = false;
   }
+}
+
+/**
+ * Say in the log whether overlapping segments could be detected at all.
+ *
+ * Whether Strava's efforts payload carries positions is not something this can
+ * know in advance, and its absence is invisible in the UI — the toggle simply
+ * never appears. One line makes the difference between "no nested segments" and
+ * "nesting could not be read" checkable on any real activity.
+ */
+function logNestingSupport(segments, matched) {
+  if (segments.length < 2) return;
+
+  if (!segments.some(segment => segment.span)) {
+    addLogEntry(
+      "Strava's efforts data on this page carries no segment positions, so segments inside other segments cannot be found",
+      'info'
+    );
+    return;
+  }
+
+  const nested = matched.filter(row => row.nestedIn).length;
+  addLogEntry(
+    nested
+      ? `${nested} matched segment(s) sit inside another segment; the summary can leave them out`
+      : 'No matched segment sits inside another',
+    'info'
+  );
 }
 
 function saveComparison() {
@@ -784,6 +818,15 @@ function buildNameCell(row) {
     line.className = 'segment-distance';
     line.textContent = context;
     td.appendChild(line);
+  }
+
+  // Says why a row may be missing from the summary, and why the same road can
+  // appear twice in the table.
+  if (row.nestedIn) {
+    const inside = document.createElement('div');
+    inside.className = 'segment-nested';
+    inside.textContent = `inside ${row.nestedIn}`;
+    td.appendChild(inside);
   }
 
   return td;
@@ -1279,6 +1322,33 @@ function buildDeltaChart(points) {
   return svg;
 }
 
+/**
+ * The choice between "every segment" and "no stretch of road counted twice".
+ *
+ * Offered only when some segment really does sit inside another, so a ride of
+ * plain, separate segments never sees it.
+ */
+function nestedToggle(nestedCount) {
+  const label = document.createElement('label');
+  label.className = 'summary-toggle';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = excludeNested;
+  checkbox.addEventListener('change', () => {
+    excludeNested = checkbox.checked;
+    renderComparison(comparison);
+  });
+  label.appendChild(checkbox);
+
+  const text = document.createElement('span');
+  text.textContent =
+    `Leave out the ${nestedCount} segment${nestedCount === 1 ? '' : 's'} inside another segment`;
+  label.appendChild(text);
+
+  return label;
+}
+
 function summaryRow(title, rows) {
   if (!rows.length) return null;
 
@@ -1306,7 +1376,7 @@ function renderSummary(data) {
 
   if (!data.matched.length) return;
 
-  const summary = summarizeComparison(data.matched);
+  const summary = summarizeComparison(data.matched, { excludeNested });
   if (!summary.compared) return;
 
   const panel = document.createElement('div');
@@ -1337,10 +1407,14 @@ function renderSummary(data) {
   counts.textContent =
     `Faster on ${summary.fasterCount}, slower on ${summary.slowerCount}` +
     (summary.evenCount ? `, level on ${summary.evenCount}` : '') +
-    (summary.compared < summary.total ? ` · ${summary.total - summary.compared} not comparable` : '');
+    (summary.notComparable ? ` · ${summary.notComparable} not comparable` : '') +
+    (excludeNested && summary.nestedCount ? ` · ${summary.nestedCount} nested left out` : '');
   panel.appendChild(counts);
 
-  const chart = buildDeltaChart(cumulativeTimeDeltas(data.matched));
+  if (summary.nestedCount) panel.appendChild(nestedToggle(summary.nestedCount));
+
+  const charted = excludeNested ? data.matched.filter(row => !row.nestedIn) : data.matched;
+  const chart = buildDeltaChart(cumulativeTimeDeltas(charted));
   if (chart) {
     const figure = document.createElement('div');
     figure.className = 'delta-chart-figure';
@@ -1363,8 +1437,11 @@ function renderSummary(data) {
   const note = document.createElement('div');
   note.className = 'summary-note';
   note.textContent =
-    'Net is the plain sum of per-segment deltas, so longer segments count for more, and a segment ' +
-    'inside another (a climb within a lap) counts in both. Click a column header to sort.';
+    'Net is the plain sum of per-segment deltas, so longer segments count for more' +
+    (excludeNested
+      ? '. Segments that sit inside another are left out, so no stretch of road is counted twice.'
+      : ', and a segment inside another (a climb within a lap) counts in both.') +
+    ' Click a column header to sort.';
   panel.appendChild(note);
 
   container.appendChild(panel);

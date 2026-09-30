@@ -571,3 +571,33 @@ describe('effortTimesFromHistory', () => {
     expect(effortTimesFromHistory(history).times.map(t => t.seconds)).toEqual([300, 280]);
   });
 });
+
+describe('where an effort sits in the activity', () => {
+  const page = efforts =>
+    parse(`<script>pageView.segmentEfforts().reset(${JSON.stringify({ efforts })}, { parse: true });</script>`);
+
+  const base = { id: '1', segment_id: 11, name: 'Lap', elapsed_time_raw: 600 };
+
+  it('prefers the stream indices when Strava sends them', () => {
+    const [segment] = extractSegments(page([{ ...base, start_index: 100, end_index: 900 }]), '1');
+    expect(segment.span).toEqual({ start: 100, end: 900 });
+  });
+
+  it('falls back to the effort start time and duration', () => {
+    const [segment] = extractSegments(
+      page([{ ...base, start_date_local: '2026-05-01T07:00:00Z', elapsed_time_raw: 600 }]),
+      '1'
+    );
+    const start = Date.parse('2026-05-01T07:00:00Z') / 1000;
+    expect(segment.span).toEqual({ start, end: start + 600 });
+  });
+
+  it('is null when the payload says nothing about position', () => {
+    expect(extractSegments(page([base]), '1')[0].span).toBeNull();
+  });
+
+  it('ignores indices that do not describe a stretch', () => {
+    const [segment] = extractSegments(page([{ ...base, start_index: 500, end_index: 500 }]), '1');
+    expect(segment.span).toBeNull();
+  });
+});

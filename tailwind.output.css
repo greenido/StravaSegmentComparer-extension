@@ -289,6 +289,28 @@ body {
   vertical-align: middle;
 }
 
+/* A segment that sits inside another, named under the segment name. */
+.segment-nested {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* The summary's "leave nested segments out" choice. */
+.summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  color: #4b5563;
+  margin-bottom: 0.25rem;
+  cursor: pointer;
+}
+
+.summary-toggle input {
+  cursor: pointer;
+}
+
 /* Where the gap opened up: one bar per segment, the running total after it. */
 .delta-chart-figure {
   margin: 0.375rem 0 0.25rem;

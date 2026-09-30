@@ -312,6 +312,30 @@ function htmlText(doc, html) {
 
 const isNumber = value => typeof value === 'number' && Number.isFinite(value);
 
+/**
+ * Where an effort sits within its activity, as a `{start, end}` pair.
+ *
+ * Only ever compared against other efforts of the *same* activity, so the unit
+ * does not matter as long as it is the same one throughout: stream indices if
+ * Strava sends them, otherwise seconds derived from the effort's start time and
+ * duration. Null when neither is available, which is a plain "unknown" — it
+ * means overlapping efforts cannot be told apart on this page, not that there
+ * are none.
+ */
+function effortSpan(effort) {
+  if (isNumber(effort.start_index) && isNumber(effort.end_index) && effort.end_index > effort.start_index) {
+    return { start: effort.start_index, end: effort.end_index };
+  }
+
+  const startedAt = Date.parse(effort.start_date_local || effort.start_date || '');
+  const seconds = isNumber(effort.elapsed_time_raw) ? effort.elapsed_time_raw : null;
+  if (!Number.isNaN(startedAt) && seconds > 0) {
+    return { start: startedAt / 1000, end: startedAt / 1000 + seconds };
+  }
+
+  return null;
+}
+
 function segmentFromEffort(doc, effort, index, activityId) {
   if (!effort || effort.id == null) return null;
 
@@ -332,6 +356,7 @@ function segmentFromEffort(doc, effort, index, activityId) {
     // No heart rate comes through as a display "0" with a null raw value.
     heartRate: isNumber(effort.avg_hr_raw) && effort.avg_hr_raw > 0 ? `${Math.round(effort.avg_hr_raw)} bpm` : null,
     grade: isNumber(effort.avg_grade_raw) ? effort.avg_grade_raw : null,
+    span: effortSpan(effort),
     achievement:
       effort.achievement_sprite_name || effort.achievement_description
         ? { sprite: effort.achievement_sprite_name || null, description: effort.achievement_description || null }
@@ -437,6 +462,8 @@ function segmentsFromRows(doc, activityId, segmentIdsByEffortId) {
           null,
         heartRate: cellMatching(row, /^\d+\s*bpm$/i),
         grade: grade === null ? null : parseFloat(grade.replace(',', '.')),
+        // Nothing in the row markup says where the effort sits in the ride.
+        span: null,
         achievement: null,
         index
       });

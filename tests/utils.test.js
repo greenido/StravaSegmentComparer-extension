@@ -27,7 +27,8 @@ import {
   hasEffortHistory,
   effortQuality,
   hasQualityData,
-  cumulativeTimeDeltas
+  cumulativeTimeDeltas,
+  markNestedSegments
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -734,5 +735,84 @@ describe('cumulativeTimeDeltas', () => {
   it('survives an empty or missing list', () => {
     expect(cumulativeTimeDeltas([])).toEqual([]);
     expect(cumulativeTimeDeltas(null)).toEqual([]);
+  });
+});
+
+describe('markNestedSegments', () => {
+  // A lap containing a climb, which itself contains a sprint, plus a separate
+  // segment further along the road.
+  const lap = { name: 'Full lap', span: { start: 0, end: 1000 } };
+  const climb = { name: 'The climb', span: { start: 200, end: 600 } };
+  const sprint = { name: 'Sprint', span: { start: 300, end: 350 } };
+  const later = { name: 'Run home', span: { start: 1200, end: 1500 } };
+
+  const nesting = segments =>
+    Object.fromEntries(markNestedSegments(segments).map(s => [s.name, s.nestedIn]));
+
+  it('names the smallest segment that contains each one', () => {
+    expect(nesting([lap, climb, sprint, later])).toEqual({
+      'Full lap': null,
+      'The climb': 'Full lap',
+      // Inside the lap as well, but the climb is the one a rider would name.
+      Sprint: 'The climb',
+      'Run home': null
+    });
+  });
+
+  it('leaves segments alone when Strava gave no positions', () => {
+    const blind = [{ name: 'A', span: null }, { name: 'B', span: null }];
+    expect(nesting(blind)).toEqual({ A: null, B: null });
+  });
+
+  it('does not nest a segment inside one of exactly the same extent', () => {
+    const twin = { name: 'Twin', span: { start: 200, end: 600 } };
+    expect(nesting([climb, twin])).toEqual({ 'The climb': null, Twin: null });
+  });
+
+  it('does not nest overlapping segments that merely share road', () => {
+    const overlap = { name: 'Overlap', span: { start: 500, end: 1400 } };
+    expect(nesting([climb, overlap])).toEqual({ 'The climb': null, Overlap: null });
+  });
+});
+
+describe('leaving nested segments out of the summary', () => {
+  const segments1 = [
+    { segmentId: '1', name: 'Full lap', time: '20:00', span: { start: 0, end: 1200 } },
+    { segmentId: '2', name: 'The climb', time: '8:00', span: { start: 200, end: 680 } },
+    { segmentId: '3', name: 'Run home', time: '5:00', span: { start: 1300, end: 1600 } }
+  ];
+  const segments2 = [
+    { segmentId: '1', name: 'Full lap', time: '21:00' },
+    { segmentId: '2', name: 'The climb', time: '8:30' },
+    { segmentId: '3', name: 'Run home', time: '5:10' }
+  ];
+  const { matched } = compareSegmentLists(segments1, segments2);
+
+  it('counts every segment by default, nesting and all', () => {
+    const summary = summarizeComparison(matched);
+    // 60 + 30 + 10, with the climb counted inside the lap as well.
+    expect(summary.netSeconds).toBe(100);
+    expect(summary.compared).toBe(3);
+    expect(summary.nestedCount).toBe(1);
+  });
+
+  it('drops the nested segment when asked, so no road counts twice', () => {
+    const summary = summarizeComparison(matched, { excludeNested: true });
+    expect(summary.netSeconds).toBe(70);
+    expect(summary.compared).toBe(2);
+    expect(summary.nestedCount).toBe(1);
+  });
+
+  it('keeps "not comparable" about unreadable rows, not about excluded ones', () => {
+    const withGap = [...matched, { name: 'Unreadable', time_diff_seconds: null }];
+    expect(summarizeComparison(withGap, { excludeNested: true }).notComparable).toBe(1);
+  });
+
+  it('reports no nesting when the segments carried no positions', () => {
+    const flat = compareSegmentLists(
+      segments1.map(({ span, ...rest }) => rest),
+      segments2
+    );
+    expect(summarizeComparison(flat.matched).nestedCount).toBe(0);
   });
 });
