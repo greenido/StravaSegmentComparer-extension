@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### 🆕 New Features
+
+- **Your history**: a "Your history" column showing where activity 1's effort
+  ranks among all your efforts on that segment ("3rd of 12"), with a sparkline
+  of your times oldest to newest and your best marked. It comes out of the same
+  effort history that fills the PR columns, so "Compare vs my PRs" pays for
+  both and no extra request is made
+- **Form**: reads each time change against the heart-rate change behind it —
+  Fitness, Effort, Even, Easier, Slower or Fading — with the sentence in the
+  tooltip. Shown when both activities recorded heart rate
+- **Where the gap opened up**: a bar per segment in course order in the summary,
+  each the running total after it, so a ride lost on one climb looks different
+  from one lost everywhere
+- **Overlapping segments**: segments that sit inside another are marked *inside
+  …* under their name, and the summary offers to leave them out so no stretch of
+  road is counted twice. Depends on Strava exposing where each effort sits in
+  the ride; the log says on each comparison whether it could
+
+### 🔧 Fixes and internals
+
+- Segment history is written to storage as it is read, so closing the popup
+  mid-run no longer throws the work away
+- The `tabs` permission is gone — the host permission already covers reading the
+  URL of a Strava tab, so installs no longer ask to "read your browsing history"
+- The popup heading reads its version from the manifest, and the build refuses a
+  bundle whose manifest and package.json versions disagree
+- Removed a Tailwind toolchain that was installed and committed but never run,
+  along with three files nothing referenced
+- GitHub Actions runs the tests and the bundle check on every push and PR
+
 ## Version 2.7 - Your rides, your heart rate
 
 ### 🆕 New Features
