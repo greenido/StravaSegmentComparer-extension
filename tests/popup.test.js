@@ -26,6 +26,9 @@ function stubChrome(overrides = {}) {
         remove: async keys => [].concat(keys).forEach(key => delete store[key])
       }
     },
+    runtime: {
+      getManifest: () => JSON.parse(read('manifest.json'))
+    },
     tabs: {
       query: async () => [],
       create: async () => ({ id: 1 }),
@@ -155,6 +158,12 @@ describe('popup rendering', () => {
     expect(section.textContent).toContain('2 segments only in');
     expect(section.textContent).toContain('Sprint');
     expect(section.textContent).toContain('Descent');
+  });
+
+  it('shows the version from the manifest, not one typed into the heading', () => {
+    const { version } = JSON.parse(read('manifest.json'));
+    expect(document.getElementById('version').textContent).toBe(version);
+    expect(document.querySelector('h1').textContent).toContain(version);
   });
 
   it('omits the unmatched section when every segment paired up', () => {

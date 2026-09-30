@@ -40,6 +40,19 @@ for (const file of runtimeFiles) {
  * it is worth catching here: the runtime list above is maintained by hand.
  */
 const manifest = JSON.parse(await readFile(resolve(output, "manifest.json"), "utf8"));
+
+// The manifest version is the one users and the Web Store see; package.json's
+// is what `npm version` bumps. A release where they disagree is a release where
+// nobody can tell which number is real, so the build refuses it.
+const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+const semver = (version) => [...String(version).split("."), "0", "0"].slice(0, 3).join(".");
+if (semver(manifest.version) !== semver(pkg.version)) {
+  console.error(
+    `Version mismatch: manifest.json is ${manifest.version}, package.json is ${pkg.version}`
+  );
+  process.exit(1);
+}
+
 const references = new Set();
 
 const collect = (value) => {

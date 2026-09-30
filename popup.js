@@ -32,6 +32,7 @@ const myActivitiesBtn = document.getElementById('myActivitiesBtn');
 const myActivitiesSection = document.getElementById('myActivitiesSection');
 const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
+const versionSpan = document.getElementById('version');
 
 let logEntries = [];
 
@@ -51,6 +52,10 @@ let sortState = { key: null, direction: 'desc' };
  * ------------------------------------------------------------------ */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // The manifest is the one place the version is written down; a number typed
+  // into the heading as well would eventually disagree with it.
+  versionSpan.textContent = chrome.runtime.getManifest().version;
+
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   prBtn.addEventListener('click', loadPersonalRecords);
