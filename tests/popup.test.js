@@ -26,6 +26,9 @@ function stubChrome(overrides = {}) {
         remove: async keys => [].concat(keys).forEach(key => delete store[key])
       }
     },
+    runtime: {
+      getManifest: () => JSON.parse(read('manifest.json'))
+    },
     tabs: {
       query: async () => [],
       create: async () => ({ id: 1 }),
@@ -155,6 +158,12 @@ describe('popup rendering', () => {
     expect(section.textContent).toContain('2 segments only in');
     expect(section.textContent).toContain('Sprint');
     expect(section.textContent).toContain('Descent');
+  });
+
+  it('shows the version from the manifest, not one typed into the heading', () => {
+    const { version } = JSON.parse(read('manifest.json'));
+    expect(document.getElementById('version').textContent).toBe(version);
+    expect(document.querySelector('h1').textContent).toContain(version);
   });
 
   it('omits the unmatched section when every segment paired up', () => {
@@ -586,7 +595,9 @@ describe('comparing against your personal records', () => {
         }))
       });
 
-      return { ok: true, data: tabId === 10 ? segments(['5:00', '4:00']) : segments(['5:10', '3:50']) };
+      const times1 = overrides.times1 || ['5:00', '4:00'];
+      const times2 = overrides.times2 || ['5:10', '3:50'];
+      return { ok: true, data: tabId === 10 ? segments(times1) : segments(times2) };
     };
 
     document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
@@ -629,6 +640,30 @@ describe('comparing against your personal records', () => {
 
     expect(firstPass).toBe(2);
     expect(total).toBe(2);
+  });
+
+  it('saves what it has read while the run is still going', async () => {
+    // The popup dies the instant the user clicks away, taking the run with it.
+    // Storing only at the end would throw away half a minute of requests.
+    const times = ['5:00', '4:00', '3:00', '2:00', '1:00', '0:50'];
+    await setup(
+      { 100: '4:30', 101: '4:10', 102: '2:55', 103: '1:58', 104: '0:59', 105: '0:45' },
+      { times1: times, times2: times }
+    );
+
+    const sizes = [];
+    const set = chrome.storage.local.set;
+    chrome.storage.local.set = async values => {
+      if (values.segmentHistoryCache) sizes.push(Object.keys(values.segmentHistoryCache).length);
+      return set(values);
+    };
+
+    await loadPersonalRecords();
+
+    // Written at the flush boundary, not once at the end.
+    expect(sizes[0]).toBe(5);
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(sizes.at(-1)).toBe(6);
   });
 
   it('keeps going when one segment fails, and does not retry it', async () => {

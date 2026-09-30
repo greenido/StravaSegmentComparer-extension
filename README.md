@@ -1,5 +1,7 @@
 # 🚴🏼‍♂️ Strava Segment Comparator Extension 🏃🏼‍♀️
 
+[![CI](https://github.com/greenido/StravaSegmentComparer-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/greenido/StravaSegmentComparer-extension/actions/workflows/ci.yml)
+
 Chrome extension to compare two Strava activities by their segments. It can auto-detect activity tabs you already have open, read segment data from each activity, compute time and speed (or pace) deltas, and export the results as CSV. It runs entirely in your browser; no servers are involved.
 
 If you have questions or issues, please open an issue on GitHub.
@@ -169,12 +171,16 @@ npm test
 loads the real `popup.html` and `popup.js` into jsdom with a stubbed `chrome`
 API and exercises the full comparison and rendering path.
 
+GitHub Actions runs `npm test` and `npm run build` on every push to `main` and
+every pull request, and keeps the packaged zip as a build artifact.
+
 ### Styles
 
 `tailwind.output.css` is **hand-maintained plain CSS** — a small subset of
-Tailwind-style utilities plus the extension's own component classes. It is not
-generated from `tailwind.css`, so do not overwrite it with a Tailwind build;
-edit it directly.
+Tailwind-style utilities plus the extension's own component classes. Edit it
+directly. There is no CSS build step and no Tailwind dependency: the name is
+historical, and a `tailwind.css` source, a Tailwind config and a PostCSS config
+all used to sit here without ever being run.
 
 Project structure (selected):
 
@@ -188,13 +194,15 @@ Project structure (selected):
 ## Privacy
 
 - No network requests to external servers are made by the extension
-- Reads only Strava activity pages and your open tabs’ URLs (for auto-detection)
+- Reads only Strava activity pages and the URLs of your open Strava tabs (for
+  auto-detection). The extension holds no `tabs` permission, so tabs on other
+  sites are invisible to it — `host_permissions` limits it to `www.strava.com`
 - Comparison results are stored with `chrome.storage.local` to auto-restore the last view
 
 ## Troubleshooting
 
 - “No segments found”: Make sure you’re on an activity page that has segments and let the page fully load. Click Compare again
-- Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages and the extension has the `tabs` permission
+- Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages. Only Strava tabs are visible to the extension
 - “Redirected away from the activity page”: You’re signed out, or the activity is private. Open it in a tab and compare again
 - Athlete names missing or “unknown”: Not all pages expose the same metadata; this is expected sometimes
 - “No personal records found”: You are either not signed in, or signed in as an athlete who has not ridden these segments. The PR columns stay hidden rather than filling with N/A
