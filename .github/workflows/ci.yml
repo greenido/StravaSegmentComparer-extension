@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      # Packages the bundle, which also checks that the manifest and popup do
+      # not reference a file the zip leaves out, and that the manifest and
+      # package.json versions agree. Both are mistakes that otherwise only
+      # surface after an upload.
+      - name: Build the bundle
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: strava-segment-comparator-*.zip
+          if-no-files-found: error

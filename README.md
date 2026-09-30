@@ -1,5 +1,7 @@
 # 🚴🏼‍♂️ Strava Segment Comparator Extension 🏃🏼‍♀️
 
+[![CI](https://github.com/greenido/StravaSegmentComparer-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/greenido/StravaSegmentComparer-extension/actions/workflows/ci.yml)
+
 Chrome extension to compare two Strava activities by their segments. It can auto-detect activity tabs you already have open, read segment data from each activity, compute time and speed (or pace) deltas, and export the results as CSV. It runs entirely in your browser; no servers are involved.
 
 If you have questions or issues, please open an issue on GitHub.
@@ -168,6 +170,9 @@ npm test
 `utils.js` and `extractor.js` are covered by unit tests; `tests/popup.test.js`
 loads the real `popup.html` and `popup.js` into jsdom with a stubbed `chrome`
 API and exercises the full comparison and rendering path.
+
+GitHub Actions runs `npm test` and `npm run build` on every push to `main` and
+every pull request, and keeps the packaged zip as a build artifact.
 
 ### Styles
 
