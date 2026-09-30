@@ -56,6 +56,22 @@ async function loadPopup() {
   await new Promise(resolve => setTimeout(resolve, 0));
 }
 
+/** Run `download`, returning the CSV text it handed to the Blob. */
+async function capturedCsv(download) {
+  const captured = [];
+  globalThis.URL.createObjectURL = () => 'blob:stub';
+  globalThis.URL.revokeObjectURL = () => {};
+  globalThis.Blob = class {
+    constructor(parts) {
+      captured.push(parts.join(''));
+    }
+  };
+  HTMLAnchorElement.prototype.click = () => {};
+
+  await download();
+  return captured[0];
+}
+
 const row = (overrides = {}) => ({
   key: 'id:1#0',
   segmentId: '1',
@@ -242,6 +258,148 @@ describe('the summary strip', () => {
 
     expect(document.getElementById('summarySection').children).toHaveLength(0);
   });
+
+  it('charts the running total, one bar per comparable segment', () => {
+    renderComparison({
+      matched: [
+        row({ name: 'Run-in', time_diff_seconds: 5 }),
+        row({ name: 'The climb', time_diff_seconds: 70 }),
+        row({ name: 'Unreadable', time_diff_seconds: null }),
+        row({ name: 'Descent', time_diff_seconds: -20 })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const bars = document.querySelectorAll('.delta-chart .delta-bar');
+    expect(bars).toHaveLength(3);
+    // Running totals of +5, +1:15, +0:55 — all behind, so all red.
+    expect([...bars].every(bar => bar.classList.contains('delta-bar-loss'))).toBe(true);
+    expect(bars[1].querySelector('title').textContent).toBe('The climb: +1:15 after this segment');
+    expect(document.querySelector('.delta-chart').getAttribute('aria-label')).toContain('ending at +0:55');
+  });
+
+  it('draws a segment that puts the rider ahead below the line, in green', () => {
+    renderComparison({
+      matched: [
+        row({ name: 'Sprint', time_diff_seconds: -30 }),
+        row({ name: 'Climb', time_diff_seconds: 10 })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const bars = document.querySelectorAll('.delta-chart .delta-bar');
+    // Still ahead overall after the climb (-0:20), so both bars are gains.
+    expect([...bars].map(bar => bar.classList.contains('delta-bar-gain'))).toEqual([true, true]);
+    // A gain hangs below the zero line: the taller bar starts at the same y.
+    expect(Number(bars[0].getAttribute('y'))).toBeCloseTo(Number(bars[1].getAttribute('y')), 1);
+  });
+
+  it('skips the chart when a single segment would make it pointless', () => {
+    renderComparison({ matched: [row({ time_diff_seconds: 5 })], onlyIn1: [], onlyIn2: [] });
+    expect(document.querySelector('.delta-chart')).toBeNull();
+  });
+});
+
+describe('segments inside other segments', () => {
+  const compare = async () => {
+    await loadPopup();
+
+    const segment = (id, name, time, span) => ({
+      segmentId: id,
+      occurrence: 0,
+      name,
+      link: 'https://www.strava.com/activities/1/segments/1',
+      time,
+      rate: '18.0 km/h',
+      span,
+      index: Number(id)
+    });
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: tabId === 10 ? '1' : '2',
+        athleteName: tabId === 10 ? 'Ada' : 'Ada, last spring',
+        activityStats: [],
+        segments:
+          tabId === 10
+            ? [
+                segment('1', 'Full lap', '20:00', { start: 0, end: 1200 }),
+                segment('2', 'The climb', '8:00', { start: 200, end: 680 }),
+                segment('3', 'Run home', '5:00', { start: 1300, end: 1600 })
+              ]
+            : [
+                segment('1', 'Full lap', '21:00', null),
+                segment('2', 'The climb', '8:30', null),
+                segment('3', 'Run home', '5:10', null)
+              ]
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  };
+
+  it('names the segment a nested one sits inside', async () => {
+    await compare();
+    expect(document.querySelector('.segment-nested').textContent).toBe('inside Full lap');
+  });
+
+  it('counts everything by default and recounts when the nested ones are left out', async () => {
+    await compare();
+
+    // +1:00 on the lap, +0:30 on the climb inside it, +0:10 on the run home.
+    expect(document.querySelector('.summary-net').textContent).toBe('+1:40');
+
+    const toggle = document.querySelector('.summary-toggle input');
+    expect(document.querySelector('.summary-toggle').textContent).toContain('1 segment inside another');
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+
+    expect(document.querySelector('.summary-net').textContent).toBe('+1:10');
+    expect(document.querySelector('.summary-counts').textContent).toContain('1 nested left out');
+    expect(document.querySelectorAll('.delta-chart .delta-bar')).toHaveLength(2);
+    // The table still shows the whole ride.
+    expect(document.querySelectorAll('#segmentsTableBody tr')).toHaveLength(3);
+  });
+
+  it('says in the log when Strava gave no positions to work from', async () => {
+    await loadPopup();
+    chrome.tabs.query = async () => [{ id: 10, url: 'https://www.strava.com/activities/1' }];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: '1',
+        athleteName: 'Ada',
+        activityStats: [],
+        segments: [1, 2].map(i => ({
+          segmentId: String(i),
+          occurrence: 0,
+          name: `Segment ${i}`,
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time: '5:00',
+          rate: '18.0 km/h',
+          span: null,
+          index: i
+        }))
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    expect(document.getElementById('logContent').textContent).toContain('carries no segment positions');
+    expect(document.querySelector('.summary-toggle')).toBeNull();
+  });
 });
 
 describe('sorting by a column header', () => {
@@ -375,6 +533,44 @@ describe('heart rate, VAM and medals', () => {
     });
     expect(headers()).toContain('HR Diff');
     expect(cells().map(td => td.textContent)).toContain('+5 bpm');
+  });
+
+  it('reads the time change against the heart-rate change in a Form column', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+    expect(headers()).not.toContain('Form');
+
+    renderComparison({
+      matched: [
+        row({
+          hr_1: '150 bpm',
+          hr_2: '142 bpm',
+          hr_diff: '-8 bpm',
+          hr_diff_value: -8,
+          // 15 s faster on 8 fewer beats.
+          quality: { key: 'fitness', label: 'Fitness', title: 'Faster at a lower heart rate' }
+        })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(headers()).toContain('Form');
+    const badge = document.querySelector('.quality');
+    expect(badge.textContent).toBe('Fitness');
+    expect(badge.classList.contains('quality-fitness')).toBe(true);
+    expect(badge.title).toBe('Faster at a lower heart rate');
+  });
+
+  it('explains the Form heading rather than telling it to sort', () => {
+    renderComparison({
+      matched: [row({ hr_1: '150 bpm', hr_diff_value: -8, quality: { key: 'even', label: 'Even', title: 'x' } })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const th = [...document.querySelectorAll('#segmentsTable thead th')].find(h => h.textContent === 'Form');
+    expect(th.title).toContain('heart rate');
+    expect(th.classList.contains('sortable')).toBe(true);
   });
 
   it('shows VAM columns for climbs, with a faster climb shaded green', () => {
@@ -577,7 +773,14 @@ describe('comparing against your personal records', () => {
       if (request.action === 'fetchSegmentHistory') {
         if (overrides.failOn === request.segmentId) throw new Error('network boom');
         const time = prBySegmentId[request.segmentId];
-        return { ok: true, pr: time ? { time } : null, historyError: overrides.historyError };
+        const times = (overrides.historyTimes || {})[request.segmentId] || null;
+        return {
+          ok: true,
+          pr: time ? { time } : null,
+          times,
+          effortCount: times ? overrides.effortCount || times.length : null,
+          historyError: overrides.historyError
+        };
       }
 
       const segments = times => ({
@@ -693,6 +896,56 @@ describe('comparing against your personal records', () => {
     await loadPersonalRecords();
 
     expect(document.getElementById('status').textContent).toBe('Found your PR for 1 of 1 segments');
+  });
+
+  it('draws your history on the segment, from the same lookup as the PR', async () => {
+    const history = {
+      100: [{ date: '2026-01-01T07:00:00Z', seconds: 290 }, { date: '2026-02-01T07:00:00Z', seconds: 300 }],
+      101: [{ date: '2026-01-01T07:00:00Z', seconds: 250 }, { date: '2026-02-01T07:00:00Z', seconds: 240 }]
+    };
+    await setup({ 100: '4:30', 101: '4:10' }, { historyTimes: history });
+    await loadPersonalRecords();
+
+    expect(headers()).toContain('Your history');
+
+    const first = document.querySelectorAll('#segmentsTableBody tr')[0];
+    const cell = [...first.children].at(-1);
+    // Activity 1 rode 5:00 (300 s), which one earlier effort of 4:50 beat.
+    expect(cell.querySelector('.history-rank').textContent).toBe('2nd of 2');
+    expect(cell.querySelector('polyline.spark-line').getAttribute('points').split(' ')).toHaveLength(2);
+    expect(cell.title).toContain('Best: 4:50');
+
+    // No extra requests: the history rides along with the PR lookup.
+    expect(sent.filter(r => r.action === 'fetchSegmentHistory')).toHaveLength(2);
+  });
+
+  it('marks your fastest effort on the sparkline, however the times run', async () => {
+    const rising = [{ seconds: 300 }, { seconds: 280 }, { seconds: 310 }];
+    await setup({ 100: '4:30' }, { historyTimes: { 100: rising } });
+    await loadPersonalRecords();
+
+    const dot = document.querySelector('#segmentsTableBody tr circle.spark-best');
+    // Fastest is the middle point of three: half way across, at the top.
+    expect(Number(dot.getAttribute('cx'))).toBeCloseTo(35, 0);
+    expect(Number(dot.getAttribute('cy'))).toBeCloseTo(2, 0);
+  });
+
+  it('exports the rank, not the drawing', async () => {
+    const history = { 100: [{ seconds: 290 }, { seconds: 300 }] };
+    await setup({ 100: '4:30' }, { historyTimes: history });
+    await loadPersonalRecords();
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')[0]).toContain('"Your history"');
+    expect(csv).toContain('"2nd of 2"');
+    expect(csv).not.toContain('svg');
+  });
+
+  it('keeps the column hidden when Strava exposed no effort history', async () => {
+    await setup({ 100: '4:30', 101: '4:10' });
+    await loadPersonalRecords();
+
+    expect(headers()).not.toContain('Your history');
   });
 
   it('logs once, with the reason, when PRs had to come from segment pages', async () => {

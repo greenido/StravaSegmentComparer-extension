@@ -20,6 +20,10 @@ If you have questions or issues, please open an issue on GitHub.
 - **Medals**: Strava's own PR / 2nd / 3rd (and KOM) marker next to each effort's time
 - **Segment context**: Distance and average grade under each segment name
 - **Personal records**: One click adds your PR for each segment and how far off it you were
+- **Your history**: Where this effort ranks among all your efforts on the segment, with a sparkline of your times and your best marked — from the same lookup as the PRs, so it costs no extra requests
+- **Form**: Reads each time change against the heart-rate change behind it — Fitness, Effort, Even, Easier, Slower or Fading
+- **Where the gap opened up**: A bar per segment in course order showing the running total, so you can see whether the time went in one place or everywhere
+- **Overlapping segments**: Segments that sit inside another are marked, and the summary can leave them out so no stretch of road is counted twice
 - **My Activities Here**: Lists your other activities on activity 1's segments, most shared first; click one to compare against it
 - **Unmatched segments**: Segments that only one activity has are listed rather than dropped
 - **Athlete-aware headers**: Uses detected athlete names for table headers when available
@@ -72,9 +76,46 @@ Above the table you get the net gap, how many segments each athlete took, and
 the biggest three losses and gains by name. The net is a plain sum of the
 per-segment deltas — the sense in which people say “I lost three minutes” — so
 a long segment contributes more to it than a short one. It is not weighted by
-segment length, and a segment inside another (a climb within a lap, a lap within
-a full-route segment) counts in both, by design: overlapping segments are often
-the interesting ones.
+segment length.
+
+Under the counts, a bar per segment in course order shows the running total:
+above the dashed line activity 2 is behind, below it is ahead. Hovering a bar
+names the segment and the total there. It answers what the net cannot — whether
+the gap opened in one place or everywhere.
+
+By default a segment inside another (a climb within a lap, a lap within a
+full-route segment) counts in both, since overlapping segments are often the
+interesting ones. Where Strava's page says where each effort sits in the ride,
+nested segments are marked *inside …* under their name and the summary offers to
+leave them out, which recounts the net and redraws the chart without counting
+any stretch of road twice. The table always keeps every row. The activity log
+says on each comparison whether positions were available at all.
+
+### Your history on a segment
+
+“Compare vs my PRs” also fills a **Your history** column: where activity 1's
+effort ranks among all your efforts on that segment (“3rd of 12”), and a
+sparkline of your times from oldest to newest with your best marked. Faster is
+drawn higher, and each segment is scaled to its own range, so the shape is your
+progression there rather than a comparison between segments. Up to 60 of your
+most recent efforts are drawn; beyond that the label says “of last 60”.
+
+### Form
+
+When both activities recorded heart rate, a **Form** column reads the two
+deltas together, which neither column says on its own:
+
+| Reading | What happened |
+| --- | --- |
+| Fitness | Faster at the same or a lower heart rate, or the same time at a lower one |
+| Effort | Faster, but at a higher heart rate |
+| Even | Same time, same heart rate |
+| Easier | Slower at a lower heart rate |
+| Slower | Slower at the same heart rate |
+| Fading | Slower at a higher heart rate |
+
+A second of timing and two beats per minute are treated as noise, so riding a
+segment the same way twice reads Even.
 
 ### Sorting
 

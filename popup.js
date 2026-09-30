@@ -47,6 +47,10 @@ let rateLabel = 'Speed';
 // meaningful in its own right. Sorting is opt-in, by clicking a header.
 let sortState = { key: null, direction: 'desc' };
 
+// Whether the summary counts segments that sit inside other segments. A view
+// choice like the sort, so it is not saved with the comparison.
+let excludeNested = false;
+
 /* ------------------------------------------------------------------ *
  * Startup
  * ------------------------------------------------------------------ */
@@ -395,8 +399,10 @@ async function compareActivities() {
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
+    logNestingSupport(activity1Data.segments, comparison.matched);
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
+    excludeNested = false;
     lastStats = { stats1: activity1Data.activityStats, stats2: activity2Data.activityStats };
 
     if (!comparison.matched.length) {
@@ -415,6 +421,34 @@ async function compareActivities() {
   } finally {
     compareBtn.disabled = false;
   }
+}
+
+/**
+ * Say in the log whether overlapping segments could be detected at all.
+ *
+ * Whether Strava's efforts payload carries positions is not something this can
+ * know in advance, and its absence is invisible in the UI — the toggle simply
+ * never appears. One line makes the difference between "no nested segments" and
+ * "nesting could not be read" checkable on any real activity.
+ */
+function logNestingSupport(segments, matched) {
+  if (segments.length < 2) return;
+
+  if (!segments.some(segment => segment.span)) {
+    addLogEntry(
+      "Strava's efforts data on this page carries no segment positions, so segments inside other segments cannot be found",
+      'info'
+    );
+    return;
+  }
+
+  const nested = matched.filter(row => row.nestedIn).length;
+  addLogEntry(
+    nested
+      ? `${nested} matched segment(s) sit inside another segment; the summary can leave them out`
+      : 'No matched segment sits inside another',
+    'info'
+  );
 }
 
 function saveComparison() {
@@ -507,11 +541,17 @@ async function fetchSegmentHistories(segmentIds) {
             await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentHistory', segmentId })
           );
           if (response.historyError) historyErrors.push(response.historyError);
-          cache[segmentId] = { pr: response.pr || null, recent: response.recent || null, fetchedAt: Date.now() };
+          cache[segmentId] = {
+            pr: response.pr || null,
+            recent: response.recent || null,
+            times: response.times || null,
+            effortCount: response.effortCount || null,
+            fetchedAt: Date.now()
+          };
         } catch (error) {
           // Cache the miss too, so one bad segment is not retried on every click.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = { pr: null, recent: null, fetchedAt: Date.now() };
+          cache[segmentId] = { pr: null, recent: null, times: null, effortCount: null, fetchedAt: Date.now() };
         }
 
         done += 1;
@@ -572,13 +612,17 @@ async function loadPersonalRecords() {
     const cache = await fetchSegmentHistories(wanted);
 
     const prBySegmentId = {};
+    const historyBySegmentId = {};
     Object.entries(cache).forEach(([segmentId, entry]) => {
       if (entry.pr) prBySegmentId[segmentId] = entry.pr;
+      if (entry.times && entry.times.length) historyBySegmentId[segmentId] = entry;
     });
 
     comparison = {
       ...comparison,
-      matched: applyPersonalRecords(comparison.matched, prBySegmentId)
+      // Both come out of the same response, so the PR columns and the history
+      // column always agree with each other.
+      matched: applyEffortHistory(applyPersonalRecords(comparison.matched, prBySegmentId), historyBySegmentId)
     };
 
     // Per segment, not per row: laps of one segment share one PR.
@@ -776,6 +820,119 @@ function buildNameCell(row) {
     td.appendChild(line);
   }
 
+  // Says why a row may be missing from the summary, and why the same road can
+  // appear twice in the table.
+  if (row.nestedIn) {
+    const inside = document.createElement('div');
+    inside.className = 'segment-nested';
+    inside.textContent = `inside ${row.nestedIn}`;
+    td.appendChild(inside);
+  }
+
+  return td;
+}
+
+/** The reading of time against heart rate, as a tinted word. */
+function buildQualityCell(row) {
+  const td = document.createElement('td');
+  if (!row.quality) {
+    td.textContent = 'N/A';
+    return td;
+  }
+
+  const badge = document.createElement('span');
+  badge.className = `quality quality-${row.quality.key}`;
+  badge.textContent = row.quality.label;
+  badge.title = row.quality.title;
+  td.appendChild(badge);
+
+  return td;
+}
+
+/* ------------------------------------------------------------------ *
+ * Your history on a segment
+ * ------------------------------------------------------------------ */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SPARK_WIDTH = 70;
+const SPARK_HEIGHT = 18;
+const SPARK_PADDING = 2;
+
+function svgElement(name, attributes) {
+  const element = document.createElementNS(SVG_NS, name);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  return element;
+}
+
+/**
+ * Your times on one segment, oldest to newest, as a sparkline.
+ *
+ * Faster is higher, which is the direction people read as improvement, and the
+ * fastest effort — your PR — is marked. The scale is per segment: the shape of
+ * your own progression is the point, not how it compares to another segment.
+ */
+function buildSparkline(times) {
+  const points = (times || []).filter(point => point && Number.isFinite(point.seconds));
+  if (points.length < 2) return null;
+
+  const seconds = points.map(point => point.seconds);
+  const fastest = Math.min(...seconds);
+  const slowest = Math.max(...seconds);
+  const span = slowest - fastest;
+
+  const usableWidth = SPARK_WIDTH - SPARK_PADDING * 2;
+  const usableHeight = SPARK_HEIGHT - SPARK_PADDING * 2;
+
+  const x = index => SPARK_PADDING + (usableWidth * index) / (points.length - 1);
+  // No spread at all (every effort the same time) sits on the middle line
+  // rather than dividing by zero.
+  const y = value =>
+    span === 0
+      ? SPARK_PADDING + usableHeight / 2
+      : SPARK_PADDING + (usableHeight * (value - fastest)) / span;
+
+  const svg = svgElement('svg', {
+    class: 'spark',
+    viewBox: `0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`,
+    width: SPARK_WIDTH,
+    height: SPARK_HEIGHT,
+    role: 'img',
+    'aria-hidden': 'true'
+  });
+
+  svg.appendChild(
+    svgElement('polyline', {
+      class: 'spark-line',
+      points: points.map((point, index) => `${x(index).toFixed(1)},${y(point.seconds).toFixed(1)}`).join(' ')
+    })
+  );
+
+  const fastestIndex = seconds.indexOf(fastest);
+  svg.appendChild(
+    svgElement('circle', {
+      class: 'spark-best',
+      cx: x(fastestIndex).toFixed(1),
+      cy: y(fastest).toFixed(1),
+      r: 1.6
+    })
+  );
+
+  return svg;
+}
+
+/** The rank among your efforts here, with the progression underneath. */
+function buildHistoryCell(row) {
+  const td = document.createElement('td');
+  if (row.history_title) td.title = row.history_title;
+
+  const label = document.createElement('div');
+  label.className = 'history-rank';
+  label.textContent = row.history_label || 'N/A';
+  td.appendChild(label);
+
+  const spark = buildSparkline(row.history_times);
+  if (spark) td.appendChild(spark);
+
   return td;
 }
 
@@ -901,6 +1058,15 @@ const COLUMNS = [
     when: data => hasHeartRateData(data.matched)
   },
   {
+    key: 'quality',
+    className: 'col-quality',
+    label: () => 'Form',
+    headerTitle: () => 'What the time change means once heart rate is taken into account',
+    build: buildQualityCell,
+    text: row => (row.quality ? row.quality.label : 'N/A'),
+    when: data => hasQualityData(data.matched)
+  },
+  {
     key: 'vam_1',
     className: 'col-vam',
     label: () => `VAM (${getDisplayName(1)})`,
@@ -937,6 +1103,15 @@ const COLUMNS = [
     text: row => row.pr_diff || 'N/A',
     style: row => diffStyle(row.pr_diff_seconds, false, 60),
     when: data => hasPersonalRecords(data.matched)
+  },
+  {
+    key: 'history',
+    className: 'col-history',
+    label: () => 'Your history',
+    build: buildHistoryCell,
+    // The CSV gets the rank, not the drawing.
+    text: row => row.history_label || 'N/A',
+    when: data => hasEffortHistory(data.matched)
   }
 ];
 
@@ -959,11 +1134,15 @@ const DEFAULT_SORT_DIRECTION = {
   hr_1: 'desc',
   hr_2: 'desc',
   hr_diff: 'desc',
+  // Best reading first.
+  quality: 'asc',
   vam_1: 'desc',
   vam_2: 'desc',
   vam_diff: 'desc',
   pr_time: 'asc',
-  pr_diff: 'desc'
+  pr_diff: 'desc',
+  // Rank 1 is your best, so the first click puts your best efforts on top.
+  history: 'asc'
 };
 
 function toggleSort(key) {
@@ -982,6 +1161,9 @@ function renderTableHead(columns) {
     const th = document.createElement('th');
     if (column.className) th.className = column.className;
     th.textContent = column.label();
+    // A column whose heading needs explaining says so; the rest get the hint
+    // that they can be sorted.
+    if (column.headerTitle) th.title = column.headerTitle();
 
     if (!isSortable(column.key)) {
       tr.appendChild(th);
@@ -992,7 +1174,7 @@ function renderTableHead(columns) {
     th.classList.add('sortable');
     th.tabIndex = 0;
     th.setAttribute('role', 'button');
-    th.title = `Sort by ${column.label()}`;
+    if (!column.headerTitle) th.title = `Sort by ${column.label()}`;
     th.setAttribute(
       'aria-sort',
       active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none'
@@ -1068,6 +1250,105 @@ function summaryChip(row) {
   return chip;
 }
 
+const CHART_WIDTH = 320;
+const CHART_HEIGHT = 56;
+const CHART_PADDING = 4;
+
+/**
+ * Where the gap opened up, as one bar per segment in course order.
+ *
+ * Each bar is the running total after that segment, so the shape answers a
+ * question the net number cannot: whether the time went in one place or
+ * everywhere. Above the zero line is behind, below is ahead — the same red and
+ * green as the table, so the colour is reinforcement rather than the only clue.
+ */
+function buildDeltaChart(points) {
+  if (points.length < 2) return null;
+
+  const values = points.map(point => point.cumulative);
+  // Zero is always in the domain, so the baseline is where it really is.
+  const top = Math.max(0, ...values);
+  const bottom = Math.min(0, ...values);
+  const span = top - bottom || 1;
+
+  const usableWidth = CHART_WIDTH - CHART_PADDING * 2;
+  const usableHeight = CHART_HEIGHT - CHART_PADDING * 2;
+  const y = value => CHART_PADDING + (usableHeight * (top - value)) / span;
+  const slot = usableWidth / points.length;
+  const barWidth = Math.max(1, slot - Math.min(2, slot * 0.25));
+
+  const svg = svgElement('svg', {
+    class: 'delta-chart',
+    viewBox: `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`,
+    preserveAspectRatio: 'none',
+    role: 'img',
+    'aria-label':
+      `Running time difference over ${points.length} segments, ` +
+      `ending at ${formatTimeDiff(values[values.length - 1])}`
+  });
+
+  const zero = y(0);
+  points.forEach((point, index) => {
+    const value = point.cumulative;
+    const height = Math.abs(y(value) - zero);
+
+    const bar = svgElement('rect', {
+      class: value > 0 ? 'delta-bar delta-bar-loss' : 'delta-bar delta-bar-gain',
+      x: (CHART_PADDING + index * slot).toFixed(1),
+      y: (value > 0 ? y(value) : zero).toFixed(1),
+      width: barWidth.toFixed(1),
+      // A segment that leaves the running total at zero still gets a hairline,
+      // so the bar count matches the segment count.
+      height: Math.max(0.5, height).toFixed(1)
+    });
+
+    const label = svgElement('title', {});
+    label.textContent = `${point.name}: ${formatTimeDiff(value)} after this segment`;
+    bar.appendChild(label);
+
+    svg.appendChild(bar);
+  });
+
+  svg.appendChild(
+    svgElement('line', {
+      class: 'delta-zero',
+      x1: CHART_PADDING,
+      x2: CHART_WIDTH - CHART_PADDING,
+      y1: zero.toFixed(1),
+      y2: zero.toFixed(1)
+    })
+  );
+
+  return svg;
+}
+
+/**
+ * The choice between "every segment" and "no stretch of road counted twice".
+ *
+ * Offered only when some segment really does sit inside another, so a ride of
+ * plain, separate segments never sees it.
+ */
+function nestedToggle(nestedCount) {
+  const label = document.createElement('label');
+  label.className = 'summary-toggle';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = excludeNested;
+  checkbox.addEventListener('change', () => {
+    excludeNested = checkbox.checked;
+    renderComparison(comparison);
+  });
+  label.appendChild(checkbox);
+
+  const text = document.createElement('span');
+  text.textContent =
+    `Leave out the ${nestedCount} segment${nestedCount === 1 ? '' : 's'} inside another segment`;
+  label.appendChild(text);
+
+  return label;
+}
+
 function summaryRow(title, rows) {
   if (!rows.length) return null;
 
@@ -1095,7 +1376,7 @@ function renderSummary(data) {
 
   if (!data.matched.length) return;
 
-  const summary = summarizeComparison(data.matched);
+  const summary = summarizeComparison(data.matched, { excludeNested });
   if (!summary.compared) return;
 
   const panel = document.createElement('div');
@@ -1126,8 +1407,26 @@ function renderSummary(data) {
   counts.textContent =
     `Faster on ${summary.fasterCount}, slower on ${summary.slowerCount}` +
     (summary.evenCount ? `, level on ${summary.evenCount}` : '') +
-    (summary.compared < summary.total ? ` · ${summary.total - summary.compared} not comparable` : '');
+    (summary.notComparable ? ` · ${summary.notComparable} not comparable` : '') +
+    (excludeNested && summary.nestedCount ? ` · ${summary.nestedCount} nested left out` : '');
   panel.appendChild(counts);
+
+  if (summary.nestedCount) panel.appendChild(nestedToggle(summary.nestedCount));
+
+  const charted = excludeNested ? data.matched.filter(row => !row.nestedIn) : data.matched;
+  const chart = buildDeltaChart(cumulativeTimeDeltas(charted));
+  if (chart) {
+    const figure = document.createElement('div');
+    figure.className = 'delta-chart-figure';
+    figure.appendChild(chart);
+
+    const caption = document.createElement('div');
+    caption.className = 'delta-chart-caption';
+    caption.textContent = `Running total along the course · above the line, ${getDisplayName(2)} is behind`;
+    figure.appendChild(caption);
+
+    panel.appendChild(figure);
+  }
 
   const losses = summaryRow('Biggest losses', summary.biggestLosses);
   if (losses) panel.appendChild(losses);
@@ -1138,8 +1437,11 @@ function renderSummary(data) {
   const note = document.createElement('div');
   note.className = 'summary-note';
   note.textContent =
-    'Net is the plain sum of per-segment deltas, so longer segments count for more, and a segment ' +
-    'inside another (a climb within a lap) counts in both. Click a column header to sort.';
+    'Net is the plain sum of per-segment deltas, so longer segments count for more' +
+    (excludeNested
+      ? '. Segments that sit inside another are left out, so no stretch of road is counted twice.'
+      : ', and a segment inside another (a climb within a lap) counts in both.') +
+    ' Click a column header to sort.';
   panel.appendChild(note);
 
   container.appendChild(panel);

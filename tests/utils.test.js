@@ -20,7 +20,15 @@ import {
   achievementLabel,
   hasHeartRateData,
   hasVamData,
-  rankSharedActivities
+  rankSharedActivities,
+  ordinal,
+  effortHistoryStats,
+  applyEffortHistory,
+  hasEffortHistory,
+  effortQuality,
+  hasQualityData,
+  cumulativeTimeDeltas,
+  markNestedSegments
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -554,5 +562,257 @@ describe('rankSharedActivities', () => {
   it('keeps the top few, and copes with segments it has no history for', () => {
     expect(rankSharedActivities(['s1', 's2', 's3', 'nope'], recentBySegmentId, 'SELF', 2)).toHaveLength(2);
     expect(rankSharedActivities(['nope'], recentBySegmentId, 'SELF')).toEqual([]);
+  });
+});
+
+describe('ordinal', () => {
+  it('uses the English suffixes, including the teens', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111].map(ordinal)).toEqual([
+      '1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th'
+    ]);
+  });
+});
+
+describe('effortHistoryStats', () => {
+  const times = [{ seconds: 320 }, { seconds: 300 }, { seconds: 310 }, { seconds: 290 }];
+
+  it('ranks an effort by how many of your efforts were faster', () => {
+    // 290 and 300 were faster than 310, so it is the third best.
+    expect(effortHistoryStats(times, '5:10', 4)).toMatchObject({
+      rank: 3,
+      count: 4,
+      total: 4,
+      bestSeconds: 290,
+      label: '3rd of 4'
+    });
+  });
+
+  it('calls your fastest effort first', () => {
+    expect(effortHistoryStats(times, '4:50', 4).label).toBe('1st of 4');
+  });
+
+  it('says the list is a tail when Strava reported more efforts than it kept', () => {
+    const stats = effortHistoryStats(times, '5:00', 90);
+    expect(stats.label).toBe('2nd of last 4');
+    expect(stats.title).toContain('of 90');
+  });
+
+  it('names your best time in the tooltip', () => {
+    expect(effortHistoryStats(times, '5:00', 4).title).toContain('4:50');
+  });
+
+  it('returns null without usable times or an unreadable effort time', () => {
+    expect(effortHistoryStats([], '5:00', 0)).toBeNull();
+    expect(effortHistoryStats(null, '5:00', 0)).toBeNull();
+    expect(effortHistoryStats(times, 'N/A', 4)).toBeNull();
+  });
+});
+
+describe('applyEffortHistory', () => {
+  const matched = [
+    { segmentId: '1', time_1: '5:10' },
+    { segmentId: '2', time_1: '2:00' },
+    { segmentId: null, time_1: '1:00' }
+  ];
+  const history = {
+    1: { times: [{ seconds: 290 }, { seconds: 310 }], effortCount: 2 }
+  };
+
+  it('attaches the rank and the times for a segment it knows', () => {
+    const [first] = applyEffortHistory(matched, history);
+    expect(first.history_rank).toBe(2);
+    expect(first.history_label).toBe('2nd of 2');
+    expect(first.history_times).toHaveLength(2);
+  });
+
+  it('leaves rows it knows nothing about as N/A rather than dropping them', () => {
+    const rows = applyEffortHistory(matched, history);
+    expect(rows).toHaveLength(3);
+    expect(rows[1].history_label).toBe('N/A');
+    expect(rows[1].history_times).toBeNull();
+    expect(rows[2].history_times).toBeNull();
+  });
+
+  it('shows the column only once a segment has two points to draw', () => {
+    expect(hasEffortHistory(applyEffortHistory(matched, history))).toBe(true);
+    const single = { 1: { times: [{ seconds: 290 }], effortCount: 1 } };
+    expect(hasEffortHistory(applyEffortHistory(matched, single))).toBe(false);
+    expect(hasEffortHistory(applyEffortHistory(matched, {}))).toBe(false);
+  });
+});
+
+describe('effortQuality', () => {
+  // Deltas are activity 2 minus activity 1: negative time is faster, negative
+  // heart rate is easier.
+  const read = (time, hr) => {
+    const quality = effortQuality(time, hr);
+    return quality && quality.key;
+  };
+
+  it('calls a faster time at a lower or equal heart rate fitness', () => {
+    expect(read(-20, -6)).toBe('fitness');
+    expect(read(-20, 0)).toBe('fitness');
+    expect(read(-20, 2)).toBe('fitness'); // within the heart-rate tolerance
+  });
+
+  it('calls a faster time bought with a higher heart rate effort', () => {
+    expect(read(-20, 8)).toBe('effort');
+  });
+
+  it('separates slower-but-easier from slower-while-working-harder', () => {
+    expect(read(30, -10)).toBe('easier');
+    expect(read(30, 0)).toBe('slower');
+    expect(read(30, 10)).toBe('fading');
+  });
+
+  it('reads the same time at a lower heart rate as fitness too', () => {
+    expect(read(0, -8)).toBe('fitness');
+    expect(read(0, 8)).toBe('effort');
+    expect(read(0, 0)).toBe('even');
+  });
+
+  it('treats a second and a couple of beats as noise, not a signal', () => {
+    expect(read(1, 2)).toBe('even');
+    expect(read(-1, -2)).toBe('even');
+  });
+
+  it('explains itself in words, for the tooltip', () => {
+    expect(effortQuality(-20, -6).title).toBe('Faster at a lower heart rate');
+    expect(effortQuality(30, 10).title).toBe('Slower at a higher heart rate');
+    expect(effortQuality(0, 0).title).toBe('Same time at the same heart rate');
+  });
+
+  it('says nothing when either reading is missing', () => {
+    expect(effortQuality(-20, null)).toBeNull();
+    expect(effortQuality(null, -6)).toBeNull();
+    expect(effortQuality(NaN, 0)).toBeNull();
+  });
+});
+
+describe('hasQualityData', () => {
+  it('is true only once a segment has both readings', () => {
+    const withBoth = compareSegmentLists(
+      [{ segmentId: '1', name: 'A', time: '5:00', heartRate: '150 bpm' }],
+      [{ segmentId: '1', name: 'A', time: '4:40', heartRate: '142 bpm' }]
+    );
+    expect(hasQualityData(withBoth.matched)).toBe(true);
+    expect(withBoth.matched[0].quality.key).toBe('fitness');
+
+    const noHr = compareSegmentLists(
+      [{ segmentId: '1', name: 'A', time: '5:00' }],
+      [{ segmentId: '1', name: 'A', time: '4:40' }]
+    );
+    expect(hasQualityData(noHr.matched)).toBe(false);
+    expect(noHr.matched[0].quality).toBeNull();
+  });
+});
+
+describe('cumulativeTimeDeltas', () => {
+  const rows = [
+    { name: 'Flat run-in', time_diff_seconds: 5 },
+    { name: 'The climb', time_diff_seconds: 70 },
+    { name: 'Descent', time_diff_seconds: -20 }
+  ];
+
+  it('adds the deltas up in course order', () => {
+    expect(cumulativeTimeDeltas(rows)).toEqual([
+      { name: 'Flat run-in', delta: 5, cumulative: 5 },
+      { name: 'The climb', delta: 70, cumulative: 75 },
+      { name: 'Descent', delta: -20, cumulative: 55 }
+    ]);
+  });
+
+  it('skips a segment it could not compare rather than counting it as zero', () => {
+    const withGap = [rows[0], { name: 'Unreadable', time_diff_seconds: null }, rows[1]];
+    expect(cumulativeTimeDeltas(withGap).map(p => p.name)).toEqual(['Flat run-in', 'The climb']);
+    expect(cumulativeTimeDeltas(withGap).at(-1).cumulative).toBe(75);
+  });
+
+  it('ends on the same number the summary reports as the net', () => {
+    expect(cumulativeTimeDeltas(rows).at(-1).cumulative).toBe(summarizeComparison(rows).netSeconds);
+  });
+
+  it('survives an empty or missing list', () => {
+    expect(cumulativeTimeDeltas([])).toEqual([]);
+    expect(cumulativeTimeDeltas(null)).toEqual([]);
+  });
+});
+
+describe('markNestedSegments', () => {
+  // A lap containing a climb, which itself contains a sprint, plus a separate
+  // segment further along the road.
+  const lap = { name: 'Full lap', span: { start: 0, end: 1000 } };
+  const climb = { name: 'The climb', span: { start: 200, end: 600 } };
+  const sprint = { name: 'Sprint', span: { start: 300, end: 350 } };
+  const later = { name: 'Run home', span: { start: 1200, end: 1500 } };
+
+  const nesting = segments =>
+    Object.fromEntries(markNestedSegments(segments).map(s => [s.name, s.nestedIn]));
+
+  it('names the smallest segment that contains each one', () => {
+    expect(nesting([lap, climb, sprint, later])).toEqual({
+      'Full lap': null,
+      'The climb': 'Full lap',
+      // Inside the lap as well, but the climb is the one a rider would name.
+      Sprint: 'The climb',
+      'Run home': null
+    });
+  });
+
+  it('leaves segments alone when Strava gave no positions', () => {
+    const blind = [{ name: 'A', span: null }, { name: 'B', span: null }];
+    expect(nesting(blind)).toEqual({ A: null, B: null });
+  });
+
+  it('does not nest a segment inside one of exactly the same extent', () => {
+    const twin = { name: 'Twin', span: { start: 200, end: 600 } };
+    expect(nesting([climb, twin])).toEqual({ 'The climb': null, Twin: null });
+  });
+
+  it('does not nest overlapping segments that merely share road', () => {
+    const overlap = { name: 'Overlap', span: { start: 500, end: 1400 } };
+    expect(nesting([climb, overlap])).toEqual({ 'The climb': null, Overlap: null });
+  });
+});
+
+describe('leaving nested segments out of the summary', () => {
+  const segments1 = [
+    { segmentId: '1', name: 'Full lap', time: '20:00', span: { start: 0, end: 1200 } },
+    { segmentId: '2', name: 'The climb', time: '8:00', span: { start: 200, end: 680 } },
+    { segmentId: '3', name: 'Run home', time: '5:00', span: { start: 1300, end: 1600 } }
+  ];
+  const segments2 = [
+    { segmentId: '1', name: 'Full lap', time: '21:00' },
+    { segmentId: '2', name: 'The climb', time: '8:30' },
+    { segmentId: '3', name: 'Run home', time: '5:10' }
+  ];
+  const { matched } = compareSegmentLists(segments1, segments2);
+
+  it('counts every segment by default, nesting and all', () => {
+    const summary = summarizeComparison(matched);
+    // 60 + 30 + 10, with the climb counted inside the lap as well.
+    expect(summary.netSeconds).toBe(100);
+    expect(summary.compared).toBe(3);
+    expect(summary.nestedCount).toBe(1);
+  });
+
+  it('drops the nested segment when asked, so no road counts twice', () => {
+    const summary = summarizeComparison(matched, { excludeNested: true });
+    expect(summary.netSeconds).toBe(70);
+    expect(summary.compared).toBe(2);
+    expect(summary.nestedCount).toBe(1);
+  });
+
+  it('keeps "not comparable" about unreadable rows, not about excluded ones', () => {
+    const withGap = [...matched, { name: 'Unreadable', time_diff_seconds: null }];
+    expect(summarizeComparison(withGap, { excludeNested: true }).notComparable).toBe(1);
+  });
+
+  it('reports no nesting when the segments carried no positions', () => {
+    const flat = compareSegmentLists(
+      segments1.map(({ span, ...rest }) => rest),
+      segments2
+    );
+    expect(summarizeComparison(flat.matched).nestedCount).toBe(0);
   });
 });

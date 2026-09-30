@@ -254,6 +254,67 @@ function achievementLabel(achievement) {
   return label ? { label, description: achievement.description || null } : null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Reading time against heart rate
+ * ------------------------------------------------------------------ */
+
+// Below these, a reading is noise: a second of timing and a couple of beats
+// are within the spread of riding the same segment the same way twice.
+const QUALITY_TIME_TOLERANCE_S = 1;
+const QUALITY_HR_TOLERANCE_BPM = 2;
+
+const QUALITY_READINGS = {
+  fitness: 'Fitness',
+  effort: 'Effort',
+  even: 'Even',
+  easier: 'Easier',
+  slower: 'Slower',
+  fading: 'Fading'
+};
+
+// Most encouraging reading to least, for sorting. Not a claim that "Effort"
+// beats "Even" as a ride — only an order the column can be sorted in.
+const QUALITY_ORDER = ['fitness', 'effort', 'even', 'easier', 'slower', 'fading'];
+
+/**
+ * What a time change means once heart rate is taken into account.
+ *
+ * A faster time at a lower heart rate is a different thing from a faster time
+ * at a higher one: the first is fitness, the second is effort. Neither column
+ * says this on its own, which is why the heart-rate delta is left unshaded, so
+ * the reading gets a column of its own.
+ *
+ * Both deltas are activity 2 minus activity 1: negative time is faster,
+ * negative heart rate is easier.
+ *
+ * @returns {{key: string, label: string, title: string}|null} null when either
+ *   reading is missing
+ */
+function effortQuality(timeDiffSeconds, hrDiff) {
+  if (!Number.isFinite(timeDiffSeconds) || !Number.isFinite(hrDiff)) return null;
+
+  const sign = (value, tolerance) => (value < -tolerance ? -1 : value > tolerance ? 1 : 0);
+  const time = sign(timeDiffSeconds, QUALITY_TIME_TOLERANCE_S);
+  const heart = sign(hrDiff, QUALITY_HR_TOLERANCE_BPM);
+
+  const pace = { '-1': 'Faster', 0: 'Same time', 1: 'Slower' }[String(time)];
+  const effort = { '-1': 'at a lower heart rate', 0: 'at the same heart rate', 1: 'at a higher heart rate' }[
+    String(heart)
+  ];
+
+  let key;
+  if (time < 0) key = heart > 0 ? 'effort' : 'fitness';
+  else if (time === 0) key = heart < 0 ? 'fitness' : heart > 0 ? 'effort' : 'even';
+  else key = heart < 0 ? 'easier' : heart > 0 ? 'fading' : 'slower';
+
+  return { key, label: QUALITY_READINGS[key], title: `${pace} ${effort}` };
+}
+
+/** True when at least one matched segment could be read this way. */
+function hasQualityData(matched) {
+  return (matched || []).some(row => row.quality && row.quality.key);
+}
+
 /**
  * Stable key for pairing a segment effort across two activities.
  *
@@ -270,6 +331,44 @@ function segmentKey(segment) {
 }
 
 /**
+ * Name each effort that lies inside another effort of the same activity.
+ *
+ * Strava's segments overlap freely: a climb sits inside a lap, a sprint inside
+ * the climb. Summing every segment therefore counts some stretches of road two
+ * or three times, which is what makes the net figure larger than the ride's
+ * actual gap.
+ *
+ * An effort is nested when another, strictly longer effort of the same activity
+ * covers it. The smallest such effort is reported, since that is the one a
+ * rider would name. Efforts with no positional data are never nested and never
+ * parents — unknown is not "no".
+ *
+ * @returns {Array} the same segments with `nestedIn` set to the enclosing
+ *   segment's name, or null
+ */
+function markNestedSegments(segments) {
+  const list = segments || [];
+
+  return list.map(segment => {
+    const span = segment.span;
+    if (!span) return { ...segment, nestedIn: null };
+
+    const length = span.end - span.start;
+    let parent = null;
+
+    list.forEach(other => {
+      if (other === segment || !other.span) return;
+      const otherLength = other.span.end - other.span.start;
+      if (otherLength <= length) return;
+      if (other.span.start > span.start || other.span.end < span.end) return;
+      if (!parent || otherLength < parent.span.end - parent.span.start) parent = other;
+    });
+
+    return { ...segment, nestedIn: parent ? parent.name : null };
+  });
+}
+
+/**
  * Pair up the segments of two activities.
  *
  * Matched rows keep activity 1's page order. Segments present in only one
@@ -283,7 +382,9 @@ function compareSegmentLists(segments1, segments2) {
   const onlyIn1 = [];
   const matchedKeys2 = new Set();
 
-  (segments1 || []).forEach(segment1 => {
+  // Nesting is read from activity 1, the same activity whose order the table
+  // keeps and whose times the PR and history columns compare against.
+  markNestedSegments(segments1).forEach(segment1 => {
     const key = segmentKey(segment1);
     const segment2 = byKey2.get(key);
 
@@ -338,12 +439,14 @@ function compareSegmentLists(segments1, segments2) {
       hr_2: segment2.heartRate || 'N/A',
       hr_diff: formatSignedDiff(hrDiff, 'bpm'),
       hr_diff_value: hrDiff,
+      quality: effortQuality(timeDiffSeconds, hrDiff),
       vam_1: formatVam(vam1),
       vam_2: formatVam(vam2),
       vam_diff: formatSignedDiff(vamDiff, 'm/h'),
       vam_diff_value: vamDiff,
       achievement_1: achievementLabel(segment1.achievement),
-      achievement_2: achievementLabel(segment2.achievement)
+      achievement_2: achievementLabel(segment2.achievement),
+      nestedIn: segment1.nestedIn || null
     });
   });
 
@@ -400,14 +503,28 @@ const SUMMARY_HIGHLIGHT_COUNT = 3;
  * minutes" means colloquially. It deliberately does not weight by segment
  * length, so a long segment contributes more than a short one.
  */
-function summarizeComparison(matched) {
-  const rows = (matched || []).filter(
-    row => typeof row.time_diff_seconds === 'number' && !Number.isNaN(row.time_diff_seconds)
+function summarizeComparison(matched, options = {}) {
+  const all = matched || [];
+  // Always counted, so the UI knows whether the choice is worth offering.
+  const nestedCount = all.filter(row => row.nestedIn).length;
+  // Counted before any exclusion, so leaving nested segments out never reads
+  // as "we could not compare them".
+  const notComparable = all.filter(
+    row => typeof row.time_diff_seconds !== 'number' || Number.isNaN(row.time_diff_seconds)
+  ).length;
+
+  const rows = all.filter(
+    row =>
+      typeof row.time_diff_seconds === 'number' &&
+      !Number.isNaN(row.time_diff_seconds) &&
+      !(options.excludeNested && row.nestedIn)
   );
 
   const empty = {
-    total: (matched || []).length,
+    total: all.length,
     compared: 0,
+    nestedCount,
+    notComparable,
     netSeconds: null,
     netText: 'N/A',
     fasterCount: 0,
@@ -423,8 +540,10 @@ function summarizeComparison(matched) {
   const netSeconds = rows.reduce((sum, row) => sum + row.time_diff_seconds, 0);
 
   return {
-    total: (matched || []).length,
+    total: all.length,
     compared: rows.length,
+    nestedCount,
+    notComparable,
     netSeconds,
     netText: formatTimeDiff(netSeconds),
     fasterCount: rows.filter(row => row.time_diff_seconds < 0).length,
@@ -436,6 +555,30 @@ function summarizeComparison(matched) {
       .slice(-SUMMARY_HIGHLIGHT_COUNT)
       .reverse()
   };
+}
+
+/**
+ * The running total of the per-segment deltas, in course order.
+ *
+ * The net number says the ride was ninety seconds slower; this says where those
+ * ninety seconds went — a steady drip, or one climb. Rows that could not be
+ * compared are skipped rather than counted as zero, so a gap in the data does
+ * not flatten the line.
+ *
+ * Always built from the matched list in activity 1 page order, which is course
+ * order, whatever the table happens to be sorted by.
+ *
+ * @returns {Array<{name: string, delta: number, cumulative: number}>}
+ */
+function cumulativeTimeDeltas(matched) {
+  let running = 0;
+
+  return (matched || [])
+    .filter(row => typeof row.time_diff_seconds === 'number' && !Number.isNaN(row.time_diff_seconds))
+    .map(row => {
+      running += row.time_diff_seconds;
+      return { name: row.name, delta: row.time_diff_seconds, cumulative: running };
+    });
 }
 
 /* ------------------------------------------------------------------ *
@@ -464,11 +607,13 @@ const SORT_ACCESSORS = {
   hr_1: row => parseHeartRate(row.hr_1),
   hr_2: row => parseHeartRate(row.hr_2),
   hr_diff: row => row.hr_diff_value,
+  quality: row => (row.quality ? QUALITY_ORDER.indexOf(row.quality.key) : null),
   vam_1: row => parseFloat(row.vam_1),
   vam_2: row => parseFloat(row.vam_2),
   vam_diff: row => row.vam_diff_value,
   pr_time: row => row.pr_time_seconds,
-  pr_diff: row => row.pr_diff_seconds
+  pr_diff: row => row.pr_diff_seconds,
+  history: row => row.history_rank
 };
 
 /** Whether a column can be sorted, so the UI knows which headers are clickable. */
@@ -545,6 +690,90 @@ function applyPersonalRecords(matched, prBySegmentId) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Your history on a segment
+ * ------------------------------------------------------------------ */
+
+/** "1st", "2nd", "3rd", "11th"… */
+function ordinal(n) {
+  const remainder = n % 100;
+  if (remainder >= 11 && remainder <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+}
+
+/**
+ * Where one effort sits among all your efforts on the same segment.
+ *
+ * Strava ranks efforts by elapsed time, so the rank here is simply how many of
+ * your other efforts were faster, plus one. The effort being ranked is normally
+ * one of `times` itself, which is what makes "3rd of 12" the right reading.
+ *
+ * @param {Array<{date: string|null, seconds: number}>} times  oldest first
+ * @param {string} effortTime  the effort to place, as a clock string
+ * @param {number} total  every effort Strava reported, which may exceed
+ *   `times.length` when the list was truncated
+ * @returns {{count: number, total: number, rank: number, bestSeconds: number,
+ *            label: string, title: string}|null}
+ */
+function effortHistoryStats(times, effortTime, total) {
+  const points = (times || []).filter(point => point && Number.isFinite(point.seconds));
+  if (!points.length) return null;
+
+  const seconds = parseTimeToSeconds(effortTime);
+  if (seconds === null) return null;
+
+  const count = points.length;
+  const reported = Number.isFinite(total) && total > count ? total : count;
+  const faster = points.filter(point => point.seconds < seconds).length;
+  const bestSeconds = Math.min(...points.map(point => point.seconds));
+
+  // Only claim a full ranking when the whole history is in hand.
+  const truncated = reported > count;
+
+  return {
+    count,
+    total: reported,
+    rank: faster + 1,
+    bestSeconds,
+    label: truncated ? `${ordinal(faster + 1)} of last ${count}` : `${ordinal(faster + 1)} of ${count}`,
+    title: truncated
+      ? `Your last ${count} efforts here, of ${reported}. Best: ${formatSecondsToTime(bestSeconds)}`
+      : `All ${count} of your efforts here. Best: ${formatSecondsToTime(bestSeconds)}`
+  };
+}
+
+/**
+ * Attach your effort history on each segment to the matched rows.
+ *
+ * Activity 1's time is the one placed in the history, matching the PR columns,
+ * which also compare against activity 1.
+ *
+ * @param {Array} matched
+ * @param {Object} historyBySegmentId  segment id -> { times, effortCount }
+ */
+function applyEffortHistory(matched, historyBySegmentId) {
+  const lookup = historyBySegmentId || {};
+
+  return (matched || []).map(row => {
+    const entry = (row.segmentId && lookup[row.segmentId]) || null;
+    const stats = entry ? effortHistoryStats(entry.times, row.time_1, entry.effortCount) : null;
+
+    return {
+      ...row,
+      history_times: entry && entry.times && entry.times.length ? entry.times : null,
+      history_rank: stats ? stats.rank : null,
+      history_count: stats ? stats.count : null,
+      history_label: stats ? stats.label : 'N/A',
+      history_title: stats ? stats.title : null
+    };
+  });
+}
+
+// One point draws no trend, so the column stays hidden until a segment has two.
+function hasEffortHistory(matched) {
+  return (matched || []).some(row => (row.history_times || []).length > 1);
+}
+
+/* ------------------------------------------------------------------ *
  * "My activities here"
  * ------------------------------------------------------------------ */
 
@@ -597,17 +826,25 @@ if (typeof module !== 'undefined' && module.exports) {
     achievementLabel,
     hasHeartRateData,
     hasVamData,
+    effortQuality,
+    hasQualityData,
     compareRates,
     segmentKey,
     compareSegmentLists,
+    markNestedSegments,
     rateColumnLabel,
     hasPowerData,
     hasPersonalRecords,
     summarizeComparison,
+    cumulativeTimeDeltas,
     rateSortValue,
     isSortable,
     sortMatched,
     applyPersonalRecords,
+    ordinal,
+    effortHistoryStats,
+    applyEffortHistory,
+    hasEffortHistory,
     rankSharedActivities
   };
 }

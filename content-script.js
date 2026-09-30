@@ -105,7 +105,11 @@ async function handleFetchActivityHtml(activityId) {
  * back so the popup can log it. An empty history is an answer ("no PR"), not
  * a failure, so it does not trigger the fallback.
  *
- * @returns {Promise<{pr: {time: string}|null, recent: Array|null, historyError?: string}>}
+ * `times` is every effort on the segment as a plain time, which the popup draws
+ * as a progression. It comes from the same response as the PR, so it costs
+ * nothing extra, and it is absent when only the segment page could be read.
+ *
+ * @returns {Promise<{pr: {time: string}|null, recent: Array|null, times: Array|null, effortCount: number|null, historyError?: string}>}
  */
 async function handleFetchSegmentHistory(segmentId) {
   let historyError;
@@ -115,7 +119,13 @@ async function handleFetchSegmentHistory(segmentId) {
     });
     const history = await response.json();
     if (Array.isArray(history && history.efforts)) {
-      return { pr: personalRecordFromHistory(history), recent: recentActivitiesFromHistory(history) };
+      const { times, total } = effortTimesFromHistory(history);
+      return {
+        pr: personalRecordFromHistory(history),
+        recent: recentActivitiesFromHistory(history),
+        times,
+        effortCount: total
+      };
     }
     historyError = 'unrecognised response';
   } catch (error) {
@@ -125,7 +135,7 @@ async function handleFetchSegmentHistory(segmentId) {
   // Validates the id again, so a refused id still fails here.
   const html = await (await fetchFromStrava(`/segments/${segmentId}`)).text();
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  return { pr: extractSegmentPersonalRecord(doc), recent: null, historyError };
+  return { pr: extractSegmentPersonalRecord(doc), recent: null, times: null, effortCount: null, historyError };
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

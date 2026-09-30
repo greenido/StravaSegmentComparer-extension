@@ -49,7 +49,15 @@ describe('fetchSegmentHistory', () => {
   it('reads the PR from the effort history without loading the segment page', async () => {
     stubFetch({ [historyPath]: { json: { efforts: [{ elapsed_time: 800 }, { elapsed_time: 754 }] } } });
 
-    expect(await fetchHistory('42')).toEqual({ ok: true, pr: { time: '12:34' }, recent: [] });
+    expect(await fetchHistory('42')).toEqual({
+      ok: true,
+      pr: { time: '12:34' },
+      recent: [],
+      // The same response yields the progression, so the popup needs no
+      // second request to draw it.
+      times: [{ date: null, seconds: 800 }, { date: null, seconds: 754 }],
+      effortCount: 2
+    });
     expect(requests.map(r => r.path)).toEqual([historyPath]);
     expect(requests[0].headers['X-Requested-With']).toBe('XMLHttpRequest');
   });
@@ -72,14 +80,20 @@ describe('fetchSegmentHistory', () => {
       recent: [
         { activityId: '12', name: 'Thursday loop', date: '2026-08-06T07:00:00Z' },
         { activityId: '11', name: 'Tuesday loop', date: '2026-08-04T07:00:00Z' }
-      ]
+      ],
+      // Oldest first, the direction the sparkline is drawn in.
+      times: [
+        { date: '2026-08-04T07:00:00Z', seconds: 800 },
+        { date: '2026-08-06T07:00:00Z', seconds: 754 }
+      ],
+      effortCount: 2
     });
   });
 
   it('trusts an empty history as "no PR" and does not ask again', async () => {
     stubFetch({ [historyPath]: { json: { efforts: [] } } });
 
-    expect(await fetchHistory('42')).toEqual({ ok: true, pr: null, recent: [] });
+    expect(await fetchHistory('42')).toEqual({ ok: true, pr: null, recent: [], times: [], effortCount: 0 });
     expect(requests).toHaveLength(1);
   });
 
@@ -91,6 +105,8 @@ describe('fetchSegmentHistory', () => {
       ok: true,
       pr: { time: '12:34' },
       recent: null,
+      times: null,
+      effortCount: null,
       historyError: 'Strava returned HTTP 404'
     });
     expect(requests.map(r => r.path)).toEqual([historyPath, '/segments/42']);
@@ -106,6 +122,8 @@ describe('fetchSegmentHistory', () => {
       ok: true,
       pr: { time: '12:34' },
       recent: null,
+      times: null,
+      effortCount: null,
       historyError: 'unrecognised response'
     });
   });
