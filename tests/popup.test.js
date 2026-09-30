@@ -402,6 +402,89 @@ describe('segments inside other segments', () => {
   });
 });
 
+describe('reading the table without colour', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  it('marks every shaded delta with an arrow as well as a tint', () => {
+    renderComparison({
+      matched: [
+        row({
+          time_diff: '-0:15',
+          time_diff_seconds: -15,
+          power_1: '220 W',
+          power_2: '245 W',
+          power_diff: '+25 W',
+          power_diff_value: 25
+        })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const marks = [...document.querySelectorAll('#segmentsTableBody .diff-mark')];
+    // Time, rate and power deltas: faster, faster, more watts.
+    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2']);
+    expect(marks.every(mark => mark.title === 'Better')).toBe(true);
+    expect(marks[0].getAttribute('aria-label')).toBe('better');
+  });
+
+  it('says nothing about a delta of zero or one it could not read', () => {
+    renderComparison({
+      matched: [row({ time_diff: '0:00', time_diff_seconds: 0, rate_diff: 'N/A', rate_diff_value: null })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(document.querySelectorAll('#segmentsTableBody .diff-mark')).toHaveLength(0);
+  });
+
+  it('leaves the heart-rate delta unmarked, as it is unshaded', () => {
+    renderComparison({
+      matched: [row({ hr_1: '150 bpm', hr_2: '142 bpm', hr_diff: '-8 bpm', hr_diff_value: -8 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const hrCell = [...document.querySelectorAll('#segmentsTableBody td')].find(
+      td => td.firstChild.textContent === '-8 bpm'
+    );
+    expect(hrCell.querySelector('.diff-mark')).toBeNull();
+  });
+});
+
+describe('opening the comparison in a tab', () => {
+  it('opens the same page with the popup size limits lifted', async () => {
+    await loadPopup();
+
+    const opened = [];
+    chrome.tabs.create = async options => {
+      opened.push(options);
+      return { id: 99 };
+    };
+    chrome.runtime.getURL = path => `chrome-extension://abc/${path}`;
+
+    document.getElementById('openTabBtn').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(opened).toEqual([{ url: 'chrome-extension://abc/popup.html?view=tab' }]);
+  });
+
+  it('drops the clamps and its own button when it is the tab', async () => {
+    const url = new URL(window.location.href);
+    url.search = '?view=tab';
+    window.history.replaceState({}, '', url);
+
+    await loadPopup();
+
+    expect(document.body.classList.contains('view-tab')).toBe(true);
+    expect(document.getElementById('openTabBtn').classList.contains('hidden')).toBe(true);
+
+    window.history.replaceState({}, '', url.pathname);
+  });
+});
+
 describe('sorting by a column header', () => {
   const clickHeader = label => {
     const th = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>
@@ -497,8 +580,9 @@ describe('power columns', () => {
     const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
     expect(headers).toContain('Power Diff');
 
-    const cells = [...document.querySelectorAll('#segmentsTableBody tr td')].map(td => td.textContent);
-    expect(cells).toContain('+25 W');
+    const cells = [...document.querySelectorAll('#segmentsTableBody tr td')];
+    const diff = cells.find(td => td.firstChild.textContent === '+25 W');
+    expect(diff.querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('shows the segment distance under its name', () => {
@@ -581,8 +665,9 @@ describe('heart rate, VAM and medals', () => {
     });
 
     expect(headers()).toContain('VAM Diff');
-    const diff = cells().find(td => td.textContent === '+160 m/h');
+    const diff = cells().find(td => td.firstChild.textContent === '+160 m/h');
     expect(diff.style.backgroundColor).toContain('34, 197, 94');
+    expect(diff.querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it("puts Strava's medal next to the effort's time", () => {
@@ -703,8 +788,11 @@ describe('comparing two activities that are already open', () => {
     const rows = document.querySelectorAll('#segmentsTableBody tr');
 
     expect(rows).toHaveLength(2);
-    expect(rows[0].children[3].textContent).toBe('+0:05');
-    expect(rows[1].children[3].textContent).toBe('-0:10');
+    // The delta, then the arrow that repeats it without relying on colour.
+    expect(rows[0].children[3].firstChild.textContent).toBe('+0:05');
+    expect(rows[0].children[3].querySelector('.diff-mark').textContent).toBe('\u25bc');
+    expect(rows[1].children[3].firstChild.textContent).toBe('-0:10');
+    expect(rows[1].children[3].querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('shows the activity stats panels', () => {
@@ -732,6 +820,14 @@ describe('comparing two activities that are already open', () => {
 
     const [, first] = captured[0].split('\n');
     expect(first).toContain('"Mile 1"');
+  });
+
+  it('keeps the direction arrows out of the CSV', async () => {
+    const csv = await capturedCsv(() => exportAsCSV());
+
+    expect(csv).toContain('"+0:05"');
+    expect(csv).not.toContain('\u25b2');
+    expect(csv).not.toContain('\u25bc');
   });
 
   it('exports a CSV with the athlete names in the headers', async () => {
@@ -820,7 +916,9 @@ describe('comparing against your personal records', () => {
 
     const first = document.querySelectorAll('#segmentsTableBody tr')[0];
     expect([...first.children].at(-2).textContent).toBe('4:30');
-    expect([...first.children].at(-1).textContent).toBe('+0:30');
+    // Slower than the PR, so the arrow agrees with the red tint.
+    expect([...first.children].at(-1).firstChild.textContent).toBe('+0:30');
+    expect([...first.children].at(-1).querySelector('.diff-mark').textContent).toBe('\u25bc');
   });
 
   it('shows a negative diff when the effort was itself a new PR', async () => {
@@ -829,7 +927,8 @@ describe('comparing against your personal records', () => {
 
     // Climb 2 was ridden in 4:00 against a stored PR of 4:10.
     const second = document.querySelectorAll('#segmentsTableBody tr')[1];
-    expect([...second.children].at(-1).textContent).toBe('-0:10');
+    expect([...second.children].at(-1).firstChild.textContent).toBe('-0:10');
+    expect([...second.children].at(-1).querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('fetches each segment once and reuses the cache on the next click', async () => {

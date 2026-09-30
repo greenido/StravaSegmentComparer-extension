@@ -14,7 +14,7 @@
   </style>
 </head>
 <body class="bg-gray-100 py-4">
-  <div class="max-w-4xl mx-auto px-4 overflow-y-auto max-h-[570px]">
+  <div id="viewport" class="max-w-4xl mx-auto px-4 overflow-y-auto max-h-[570px]">
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-xxl font-bold text-strava flex items-center">
         <img src="icons/run-128-logo.png" alt="Info" class="h-5 w-5 text-blue-500 mr-1" style="padding-right: 2em;">
@@ -109,6 +109,13 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
             </svg>
             Compare vs my PRs
+          </button>
+
+          <button id="openTabBtn" title="Open this comparison in a full browser tab" class="btn text-xs py-1 px-3 bg-blue-500 hover:bg-blue-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            Open in tab
           </button>
 
           <button id="clearBtn" class="btn text-xs py-1 px-3 bg-red-500 hover:bg-red-600 text-white">
