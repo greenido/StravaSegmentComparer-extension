@@ -578,6 +578,43 @@ function personalRecordFromHistory(history) {
 // entire history.
 const HISTORY_RECENT_LIMIT = 20;
 
+// Enough points to show a trend at sparkline size, without storing years of a
+// segment someone rides to work every day.
+const HISTORY_TIMES_LIMIT = 60;
+
+/**
+ * The athlete's efforts on a segment as `{date, seconds}` pairs, oldest first,
+ * from the same history the PR comes from.
+ *
+ * The PR is one number out of this list; keeping the list costs no extra
+ * request and is what "am I getting faster here?" actually needs.
+ *
+ * @returns {{times: Array<{date: string|null, seconds: number}>, total: number}}
+ *   `total` counts every usable effort, so a truncated list can still say what
+ *   it is a subset of.
+ */
+function effortTimesFromHistory(history) {
+  const efforts = ((history && history.efforts) || [])
+    .map((effort, index) => {
+      const seconds = effort && effort.elapsed_time;
+      if (!Number.isInteger(seconds) || seconds <= 0) return null;
+
+      const date = effort.start_date_local || effort.start_date || null;
+      const when = Date.parse(date || '');
+      return { index, when: Number.isNaN(when) ? null : when, date, seconds };
+    })
+    .filter(Boolean);
+
+  // Strava sends efforts oldest first; a date, where there is one, is better
+  // evidence than the order.
+  efforts.sort((a, b) => (a.when === null ? 0 : a.when) - (b.when === null ? 0 : b.when) || a.index - b.index);
+
+  return {
+    times: efforts.slice(-HISTORY_TIMES_LIMIT).map(({ date, seconds }) => ({ date, seconds })),
+    total: efforts.length
+  };
+}
+
 /**
  * The signed-in athlete's most recent activities on a segment, newest first
  * and one entry per activity, from the same history as the PR.
@@ -629,6 +666,7 @@ if (typeof module !== 'undefined' && module.exports) {
     extractSegmentPersonalRecord,
     personalRecordFromHistory,
     recentActivitiesFromHistory,
+    effortTimesFromHistory,
     hasSegments
   };
 }

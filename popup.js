@@ -507,11 +507,17 @@ async function fetchSegmentHistories(segmentIds) {
             await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentHistory', segmentId })
           );
           if (response.historyError) historyErrors.push(response.historyError);
-          cache[segmentId] = { pr: response.pr || null, recent: response.recent || null, fetchedAt: Date.now() };
+          cache[segmentId] = {
+            pr: response.pr || null,
+            recent: response.recent || null,
+            times: response.times || null,
+            effortCount: response.effortCount || null,
+            fetchedAt: Date.now()
+          };
         } catch (error) {
           // Cache the miss too, so one bad segment is not retried on every click.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = { pr: null, recent: null, fetchedAt: Date.now() };
+          cache[segmentId] = { pr: null, recent: null, times: null, effortCount: null, fetchedAt: Date.now() };
         }
 
         done += 1;
@@ -572,13 +578,17 @@ async function loadPersonalRecords() {
     const cache = await fetchSegmentHistories(wanted);
 
     const prBySegmentId = {};
+    const historyBySegmentId = {};
     Object.entries(cache).forEach(([segmentId, entry]) => {
       if (entry.pr) prBySegmentId[segmentId] = entry.pr;
+      if (entry.times && entry.times.length) historyBySegmentId[segmentId] = entry;
     });
 
     comparison = {
       ...comparison,
-      matched: applyPersonalRecords(comparison.matched, prBySegmentId)
+      // Both come out of the same response, so the PR columns and the history
+      // column always agree with each other.
+      matched: applyEffortHistory(applyPersonalRecords(comparison.matched, prBySegmentId), historyBySegmentId)
     };
 
     // Per segment, not per row: laps of one segment share one PR.
@@ -779,6 +789,93 @@ function buildNameCell(row) {
   return td;
 }
 
+/* ------------------------------------------------------------------ *
+ * Your history on a segment
+ * ------------------------------------------------------------------ */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SPARK_WIDTH = 70;
+const SPARK_HEIGHT = 18;
+const SPARK_PADDING = 2;
+
+function svgElement(name, attributes) {
+  const element = document.createElementNS(SVG_NS, name);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  return element;
+}
+
+/**
+ * Your times on one segment, oldest to newest, as a sparkline.
+ *
+ * Faster is higher, which is the direction people read as improvement, and the
+ * fastest effort — your PR — is marked. The scale is per segment: the shape of
+ * your own progression is the point, not how it compares to another segment.
+ */
+function buildSparkline(times) {
+  const points = (times || []).filter(point => point && Number.isFinite(point.seconds));
+  if (points.length < 2) return null;
+
+  const seconds = points.map(point => point.seconds);
+  const fastest = Math.min(...seconds);
+  const slowest = Math.max(...seconds);
+  const span = slowest - fastest;
+
+  const usableWidth = SPARK_WIDTH - SPARK_PADDING * 2;
+  const usableHeight = SPARK_HEIGHT - SPARK_PADDING * 2;
+
+  const x = index => SPARK_PADDING + (usableWidth * index) / (points.length - 1);
+  // No spread at all (every effort the same time) sits on the middle line
+  // rather than dividing by zero.
+  const y = value =>
+    span === 0
+      ? SPARK_PADDING + usableHeight / 2
+      : SPARK_PADDING + (usableHeight * (value - fastest)) / span;
+
+  const svg = svgElement('svg', {
+    class: 'spark',
+    viewBox: `0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`,
+    width: SPARK_WIDTH,
+    height: SPARK_HEIGHT,
+    role: 'img',
+    'aria-hidden': 'true'
+  });
+
+  svg.appendChild(
+    svgElement('polyline', {
+      class: 'spark-line',
+      points: points.map((point, index) => `${x(index).toFixed(1)},${y(point.seconds).toFixed(1)}`).join(' ')
+    })
+  );
+
+  const fastestIndex = seconds.indexOf(fastest);
+  svg.appendChild(
+    svgElement('circle', {
+      class: 'spark-best',
+      cx: x(fastestIndex).toFixed(1),
+      cy: y(fastest).toFixed(1),
+      r: 1.6
+    })
+  );
+
+  return svg;
+}
+
+/** The rank among your efforts here, with the progression underneath. */
+function buildHistoryCell(row) {
+  const td = document.createElement('td');
+  if (row.history_title) td.title = row.history_title;
+
+  const label = document.createElement('div');
+  label.className = 'history-rank';
+  label.textContent = row.history_label || 'N/A';
+  td.appendChild(label);
+
+  const spark = buildSparkline(row.history_times);
+  if (spark) td.appendChild(spark);
+
+  return td;
+}
+
 /** An effort's time, with Strava's medal for it (PR, 2nd, KOM…) alongside. */
 function buildTimeCell(time, medal) {
   const td = cell(time);
@@ -937,6 +1034,15 @@ const COLUMNS = [
     text: row => row.pr_diff || 'N/A',
     style: row => diffStyle(row.pr_diff_seconds, false, 60),
     when: data => hasPersonalRecords(data.matched)
+  },
+  {
+    key: 'history',
+    className: 'col-history',
+    label: () => 'Your history',
+    build: buildHistoryCell,
+    // The CSV gets the rank, not the drawing.
+    text: row => row.history_label || 'N/A',
+    when: data => hasEffortHistory(data.matched)
   }
 ];
 
@@ -963,7 +1069,9 @@ const DEFAULT_SORT_DIRECTION = {
   vam_2: 'desc',
   vam_diff: 'desc',
   pr_time: 'asc',
-  pr_diff: 'desc'
+  pr_diff: 'desc',
+  // Rank 1 is your best, so the first click puts your best efforts on top.
+  history: 'asc'
 };
 
 function toggleSort(key) {

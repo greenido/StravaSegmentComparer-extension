@@ -468,7 +468,8 @@ const SORT_ACCESSORS = {
   vam_2: row => parseFloat(row.vam_2),
   vam_diff: row => row.vam_diff_value,
   pr_time: row => row.pr_time_seconds,
-  pr_diff: row => row.pr_diff_seconds
+  pr_diff: row => row.pr_diff_seconds,
+  history: row => row.history_rank
 };
 
 /** Whether a column can be sorted, so the UI knows which headers are clickable. */
@@ -545,6 +546,90 @@ function applyPersonalRecords(matched, prBySegmentId) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Your history on a segment
+ * ------------------------------------------------------------------ */
+
+/** "1st", "2nd", "3rd", "11th"… */
+function ordinal(n) {
+  const remainder = n % 100;
+  if (remainder >= 11 && remainder <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+}
+
+/**
+ * Where one effort sits among all your efforts on the same segment.
+ *
+ * Strava ranks efforts by elapsed time, so the rank here is simply how many of
+ * your other efforts were faster, plus one. The effort being ranked is normally
+ * one of `times` itself, which is what makes "3rd of 12" the right reading.
+ *
+ * @param {Array<{date: string|null, seconds: number}>} times  oldest first
+ * @param {string} effortTime  the effort to place, as a clock string
+ * @param {number} total  every effort Strava reported, which may exceed
+ *   `times.length` when the list was truncated
+ * @returns {{count: number, total: number, rank: number, bestSeconds: number,
+ *            label: string, title: string}|null}
+ */
+function effortHistoryStats(times, effortTime, total) {
+  const points = (times || []).filter(point => point && Number.isFinite(point.seconds));
+  if (!points.length) return null;
+
+  const seconds = parseTimeToSeconds(effortTime);
+  if (seconds === null) return null;
+
+  const count = points.length;
+  const reported = Number.isFinite(total) && total > count ? total : count;
+  const faster = points.filter(point => point.seconds < seconds).length;
+  const bestSeconds = Math.min(...points.map(point => point.seconds));
+
+  // Only claim a full ranking when the whole history is in hand.
+  const truncated = reported > count;
+
+  return {
+    count,
+    total: reported,
+    rank: faster + 1,
+    bestSeconds,
+    label: truncated ? `${ordinal(faster + 1)} of last ${count}` : `${ordinal(faster + 1)} of ${count}`,
+    title: truncated
+      ? `Your last ${count} efforts here, of ${reported}. Best: ${formatSecondsToTime(bestSeconds)}`
+      : `All ${count} of your efforts here. Best: ${formatSecondsToTime(bestSeconds)}`
+  };
+}
+
+/**
+ * Attach your effort history on each segment to the matched rows.
+ *
+ * Activity 1's time is the one placed in the history, matching the PR columns,
+ * which also compare against activity 1.
+ *
+ * @param {Array} matched
+ * @param {Object} historyBySegmentId  segment id -> { times, effortCount }
+ */
+function applyEffortHistory(matched, historyBySegmentId) {
+  const lookup = historyBySegmentId || {};
+
+  return (matched || []).map(row => {
+    const entry = (row.segmentId && lookup[row.segmentId]) || null;
+    const stats = entry ? effortHistoryStats(entry.times, row.time_1, entry.effortCount) : null;
+
+    return {
+      ...row,
+      history_times: entry && entry.times && entry.times.length ? entry.times : null,
+      history_rank: stats ? stats.rank : null,
+      history_count: stats ? stats.count : null,
+      history_label: stats ? stats.label : 'N/A',
+      history_title: stats ? stats.title : null
+    };
+  });
+}
+
+// One point draws no trend, so the column stays hidden until a segment has two.
+function hasEffortHistory(matched) {
+  return (matched || []).some(row => (row.history_times || []).length > 1);
+}
+
+/* ------------------------------------------------------------------ *
  * "My activities here"
  * ------------------------------------------------------------------ */
 
@@ -608,6 +693,10 @@ if (typeof module !== 'undefined' && module.exports) {
     isSortable,
     sortMatched,
     applyPersonalRecords,
+    ordinal,
+    effortHistoryStats,
+    applyEffortHistory,
+    hasEffortHistory,
     rankSharedActivities
   };
 }

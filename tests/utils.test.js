@@ -20,7 +20,11 @@ import {
   achievementLabel,
   hasHeartRateData,
   hasVamData,
-  rankSharedActivities
+  rankSharedActivities,
+  ordinal,
+  effortHistoryStats,
+  applyEffortHistory,
+  hasEffortHistory
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -554,5 +558,81 @@ describe('rankSharedActivities', () => {
   it('keeps the top few, and copes with segments it has no history for', () => {
     expect(rankSharedActivities(['s1', 's2', 's3', 'nope'], recentBySegmentId, 'SELF', 2)).toHaveLength(2);
     expect(rankSharedActivities(['nope'], recentBySegmentId, 'SELF')).toEqual([]);
+  });
+});
+
+describe('ordinal', () => {
+  it('uses the English suffixes, including the teens', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111].map(ordinal)).toEqual([
+      '1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th'
+    ]);
+  });
+});
+
+describe('effortHistoryStats', () => {
+  const times = [{ seconds: 320 }, { seconds: 300 }, { seconds: 310 }, { seconds: 290 }];
+
+  it('ranks an effort by how many of your efforts were faster', () => {
+    // 290 and 300 were faster than 310, so it is the third best.
+    expect(effortHistoryStats(times, '5:10', 4)).toMatchObject({
+      rank: 3,
+      count: 4,
+      total: 4,
+      bestSeconds: 290,
+      label: '3rd of 4'
+    });
+  });
+
+  it('calls your fastest effort first', () => {
+    expect(effortHistoryStats(times, '4:50', 4).label).toBe('1st of 4');
+  });
+
+  it('says the list is a tail when Strava reported more efforts than it kept', () => {
+    const stats = effortHistoryStats(times, '5:00', 90);
+    expect(stats.label).toBe('2nd of last 4');
+    expect(stats.title).toContain('of 90');
+  });
+
+  it('names your best time in the tooltip', () => {
+    expect(effortHistoryStats(times, '5:00', 4).title).toContain('4:50');
+  });
+
+  it('returns null without usable times or an unreadable effort time', () => {
+    expect(effortHistoryStats([], '5:00', 0)).toBeNull();
+    expect(effortHistoryStats(null, '5:00', 0)).toBeNull();
+    expect(effortHistoryStats(times, 'N/A', 4)).toBeNull();
+  });
+});
+
+describe('applyEffortHistory', () => {
+  const matched = [
+    { segmentId: '1', time_1: '5:10' },
+    { segmentId: '2', time_1: '2:00' },
+    { segmentId: null, time_1: '1:00' }
+  ];
+  const history = {
+    1: { times: [{ seconds: 290 }, { seconds: 310 }], effortCount: 2 }
+  };
+
+  it('attaches the rank and the times for a segment it knows', () => {
+    const [first] = applyEffortHistory(matched, history);
+    expect(first.history_rank).toBe(2);
+    expect(first.history_label).toBe('2nd of 2');
+    expect(first.history_times).toHaveLength(2);
+  });
+
+  it('leaves rows it knows nothing about as N/A rather than dropping them', () => {
+    const rows = applyEffortHistory(matched, history);
+    expect(rows).toHaveLength(3);
+    expect(rows[1].history_label).toBe('N/A');
+    expect(rows[1].history_times).toBeNull();
+    expect(rows[2].history_times).toBeNull();
+  });
+
+  it('shows the column only once a segment has two points to draw', () => {
+    expect(hasEffortHistory(applyEffortHistory(matched, history))).toBe(true);
+    const single = { 1: { times: [{ seconds: 290 }], effortCount: 1 } };
+    expect(hasEffortHistory(applyEffortHistory(matched, single))).toBe(false);
+    expect(hasEffortHistory(applyEffortHistory(matched, {}))).toBe(false);
   });
 });

@@ -56,6 +56,22 @@ async function loadPopup() {
   await new Promise(resolve => setTimeout(resolve, 0));
 }
 
+/** Run `download`, returning the CSV text it handed to the Blob. */
+async function capturedCsv(download) {
+  const captured = [];
+  globalThis.URL.createObjectURL = () => 'blob:stub';
+  globalThis.URL.revokeObjectURL = () => {};
+  globalThis.Blob = class {
+    constructor(parts) {
+      captured.push(parts.join(''));
+    }
+  };
+  HTMLAnchorElement.prototype.click = () => {};
+
+  await download();
+  return captured[0];
+}
+
 const row = (overrides = {}) => ({
   key: 'id:1#0',
   segmentId: '1',
@@ -577,7 +593,14 @@ describe('comparing against your personal records', () => {
       if (request.action === 'fetchSegmentHistory') {
         if (overrides.failOn === request.segmentId) throw new Error('network boom');
         const time = prBySegmentId[request.segmentId];
-        return { ok: true, pr: time ? { time } : null, historyError: overrides.historyError };
+        const times = (overrides.historyTimes || {})[request.segmentId] || null;
+        return {
+          ok: true,
+          pr: time ? { time } : null,
+          times,
+          effortCount: times ? overrides.effortCount || times.length : null,
+          historyError: overrides.historyError
+        };
       }
 
       const segments = times => ({
@@ -693,6 +716,56 @@ describe('comparing against your personal records', () => {
     await loadPersonalRecords();
 
     expect(document.getElementById('status').textContent).toBe('Found your PR for 1 of 1 segments');
+  });
+
+  it('draws your history on the segment, from the same lookup as the PR', async () => {
+    const history = {
+      100: [{ date: '2026-01-01T07:00:00Z', seconds: 290 }, { date: '2026-02-01T07:00:00Z', seconds: 300 }],
+      101: [{ date: '2026-01-01T07:00:00Z', seconds: 250 }, { date: '2026-02-01T07:00:00Z', seconds: 240 }]
+    };
+    await setup({ 100: '4:30', 101: '4:10' }, { historyTimes: history });
+    await loadPersonalRecords();
+
+    expect(headers()).toContain('Your history');
+
+    const first = document.querySelectorAll('#segmentsTableBody tr')[0];
+    const cell = [...first.children].at(-1);
+    // Activity 1 rode 5:00 (300 s), which one earlier effort of 4:50 beat.
+    expect(cell.querySelector('.history-rank').textContent).toBe('2nd of 2');
+    expect(cell.querySelector('polyline.spark-line').getAttribute('points').split(' ')).toHaveLength(2);
+    expect(cell.title).toContain('Best: 4:50');
+
+    // No extra requests: the history rides along with the PR lookup.
+    expect(sent.filter(r => r.action === 'fetchSegmentHistory')).toHaveLength(2);
+  });
+
+  it('marks your fastest effort on the sparkline, however the times run', async () => {
+    const rising = [{ seconds: 300 }, { seconds: 280 }, { seconds: 310 }];
+    await setup({ 100: '4:30' }, { historyTimes: { 100: rising } });
+    await loadPersonalRecords();
+
+    const dot = document.querySelector('#segmentsTableBody tr circle.spark-best');
+    // Fastest is the middle point of three: half way across, at the top.
+    expect(Number(dot.getAttribute('cx'))).toBeCloseTo(35, 0);
+    expect(Number(dot.getAttribute('cy'))).toBeCloseTo(2, 0);
+  });
+
+  it('exports the rank, not the drawing', async () => {
+    const history = { 100: [{ seconds: 290 }, { seconds: 300 }] };
+    await setup({ 100: '4:30' }, { historyTimes: history });
+    await loadPersonalRecords();
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')[0]).toContain('"Your history"');
+    expect(csv).toContain('"2nd of 2"');
+    expect(csv).not.toContain('svg');
+  });
+
+  it('keeps the column hidden when Strava exposed no effort history', async () => {
+    await setup({ 100: '4:30', 101: '4:10' });
+    await loadPersonalRecords();
+
+    expect(headers()).not.toContain('Your history');
   });
 
   it('logs once, with the reason, when PRs had to come from segment pages', async () => {

@@ -9,6 +9,7 @@ import {
   extractSegmentPersonalRecord,
   personalRecordFromHistory,
   recentActivitiesFromHistory,
+  effortTimesFromHistory,
   hasSegments
 } from '../extractor.js';
 
@@ -520,5 +521,53 @@ describe('extractSegmentPersonalRecord', () => {
     // Null means "unknown", which renders as N/A. It never means "no PR".
     expect(extractSegmentPersonalRecord(parse('<div>Log in to see your efforts</div>'))).toBeNull();
     expect(extractSegmentPersonalRecord(parse('<div>Leaderboard 9:12</div>'))).toBeNull();
+  });
+});
+
+describe('effortTimesFromHistory', () => {
+  const effort = (seconds, date) => ({ elapsed_time: seconds, start_date_local: date });
+
+  it('returns every effort as a date and a time, oldest first', () => {
+    const history = {
+      efforts: [effort(310, '2026-05-01T07:00:00Z'), effort(298, '2026-06-01T07:00:00Z')]
+    };
+
+    expect(effortTimesFromHistory(history)).toEqual({
+      times: [
+        { date: '2026-05-01T07:00:00Z', seconds: 310 },
+        { date: '2026-06-01T07:00:00Z', seconds: 298 }
+      ],
+      total: 2
+    });
+  });
+
+  it('orders by date rather than trusting the order Strava sent', () => {
+    const history = {
+      efforts: [effort(300, '2026-07-01T07:00:00Z'), effort(280, '2026-02-01T07:00:00Z')]
+    };
+
+    expect(effortTimesFromHistory(history).times.map(t => t.seconds)).toEqual([280, 300]);
+  });
+
+  it('keeps the most recent 60 of a commute segment, and still reports the total', () => {
+    const day = i => new Date(Date.UTC(2026, 0, 1 + i)).toISOString();
+    const efforts = Array.from({ length: 75 }, (_, i) => effort(200 + i, day(i)));
+
+    const { times, total } = effortTimesFromHistory({ efforts });
+    expect(total).toBe(75);
+    expect(times).toHaveLength(60);
+    // The tail, so the newest effort is the last point.
+    expect(times.at(-1).seconds).toBe(274);
+  });
+
+  it('skips efforts with no usable time, and survives an empty history', () => {
+    const history = { efforts: [effort(null), effort(0), { elapsed_time: '9' }, effort(120)] };
+    expect(effortTimesFromHistory(history)).toEqual({ times: [{ date: null, seconds: 120 }], total: 1 });
+    expect(effortTimesFromHistory(null)).toEqual({ times: [], total: 0 });
+  });
+
+  it('falls back to the order sent when no effort carries a date', () => {
+    const history = { efforts: [{ elapsed_time: 300 }, { elapsed_time: 280 }] };
+    expect(effortTimesFromHistory(history).times.map(t => t.seconds)).toEqual([300, 280]);
   });
 });

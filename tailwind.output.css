@@ -268,6 +268,7 @@ body {
 .col-power { width: 10%; }
 .col-hr { width: 9%; }
 .col-vam { width: 10%; }
+.col-history { width: 11%; }
 
 /* Values stay on one line ("+6 bpm", not "+6 / bpm"); the table scrolls
    sideways instead. Only the segment name may wrap. */
@@ -285,6 +286,32 @@ body {
   color: #92400e;
   background-color: #fde68a;
   vertical-align: middle;
+}
+
+/* Your efforts on a segment over time: rank, then the progression. Faster is
+   higher, and the dot is your best. */
+.history-rank {
+  font-size: 0.6875rem;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.spark {
+  display: block;
+  margin-top: 0.125rem;
+  overflow: visible;
+}
+
+.spark-line {
+  fill: none;
+  stroke: #9ca3af;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.spark-best {
+  fill: #16a34a;
 }
 
 /* Segment distance, shown under the segment name. */
