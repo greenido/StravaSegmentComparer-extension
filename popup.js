@@ -30,6 +30,9 @@ const clearBtn = document.getElementById('clearBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const myActivitiesBtn = document.getElementById('myActivitiesBtn');
 const myActivitiesSection = document.getElementById('myActivitiesSection');
+const openTabBtn = document.getElementById('openTabBtn');
+const tableSearch = document.getElementById('tableSearch');
+const filterCount = document.getElementById('filterCount');
 const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
 const versionSpan = document.getElementById('version');
@@ -51,6 +54,9 @@ let sortState = { key: null, direction: 'desc' };
 // choice like the sort, so it is not saved with the comparison.
 let excludeNested = false;
 
+// Substring the table is narrowed to, by segment name. Also a view choice.
+let filterText = '';
+
 /* ------------------------------------------------------------------ *
  * Startup
  * ------------------------------------------------------------------ */
@@ -59,6 +65,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // The manifest is the one place the version is written down; a number typed
   // into the heading as well would eventually disagree with it.
   versionSpan.textContent = chrome.runtime.getManifest().version;
+
+  applyTabView();
 
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
@@ -77,6 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  openTabBtn.addEventListener('click', openInTab);
+  tableSearch.addEventListener('input', () => {
+    filterText = tableSearch.value.trim();
+    renderComparison(comparison);
+  });
   clearBtn.addEventListener('click', clearResults);
 
   restoreState();
@@ -112,6 +125,9 @@ async function clearResults() {
 
   comparison = { matched: [], onlyIn1: [], onlyIn2: [] };
   sortState = { key: null, direction: 'desc' };
+  filterText = '';
+  tableSearch.value = '';
+  filterCount.classList.add('hidden');
   document.getElementById('segmentsTableBody').replaceChildren();
   document.getElementById('segmentsTableHead').replaceChildren();
   document.getElementById('summarySection').replaceChildren();
@@ -121,6 +137,36 @@ async function clearResults() {
 
   addLogEntry('Cleared saved results', 'info');
   showStatus('Results cleared successfully', 'success');
+}
+
+/* ------------------------------------------------------------------ *
+ * Popup or tab
+ * ------------------------------------------------------------------ */
+
+// The same page serves both; this is what tells it which one it is in.
+const TAB_VIEW_PARAM = 'view=tab';
+
+function isTabView() {
+  return new URLSearchParams(window.location.search).get('view') === 'tab';
+}
+
+/**
+ * Drop the popup's size limits when the page is a tab of its own.
+ *
+ * A Chrome popup can be 800px wide at most, and the table reaches eighteen
+ * columns with the optional ones showing, so the wide view is a real one — it
+ * is the same page, reading the same saved comparison, without the clamps.
+ */
+function applyTabView() {
+  if (!isTabView()) return;
+
+  document.body.classList.add('view-tab');
+  // Opening a tab from a tab would be a curiosity, not a feature.
+  openTabBtn.classList.add('hidden');
+}
+
+function openInTab() {
+  chrome.tabs.create({ url: chrome.runtime.getURL(`popup.html?${TAB_VIEW_PARAM}`) });
 }
 
 /* ------------------------------------------------------------------ *
@@ -396,6 +442,8 @@ async function compareActivities() {
 
     addLogEntry(`Activity #1: ${activity1Data.segments.length} segments`, 'success');
     addLogEntry(`Activity #2: ${activity2Data.segments.length} segments`, 'success');
+    logStatsSource(1, activity1Data);
+    logStatsSource(2, activity2Data);
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
@@ -403,6 +451,8 @@ async function compareActivities() {
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
     excludeNested = false;
+    filterText = '';
+    tableSearch.value = '';
     lastStats = { stats1: activity1Data.activityStats, stats2: activity2Data.activityStats };
 
     if (!comparison.matched.length) {
@@ -420,6 +470,21 @@ async function compareActivities() {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     compareBtn.disabled = false;
+  }
+}
+
+/**
+ * Say where the activity stats came from, when it was not the page itself.
+ *
+ * Reading the rendered markup is the normal path and stays quiet. The other two
+ * outcomes are worth a line: they are the difference between "Strava changed
+ * its layout again" and "this page never had stats to read".
+ */
+function logStatsSource(index, activity) {
+  if (activity.activityStatsSource === 'data') {
+    addLogEntry(`Activity #${index}: stats read from Strava's embedded data, not the page markup`, 'info');
+  } else if (activity.activityStatsSource === 'none') {
+    addLogEntry(`Activity #${index}: no activity stats found`, 'warning');
   }
 }
 
@@ -780,13 +845,45 @@ function cell(text, className) {
  * unit `delta` is expressed (seconds, km/h, seconds per km).
  */
 function diffStyle(delta, positiveIsFaster, scale) {
-  if (delta === null || delta === undefined || Number.isNaN(delta) || delta === 0) return '';
+  const better = isImprovement(delta, positiveIsFaster);
+  if (better === null) return '';
 
-  const faster = positiveIsFaster ? delta > 0 : delta < 0;
   const alpha = Math.min(0.85, Math.abs(delta) / scale);
-  return faster
+  return better
     ? `background-color: rgba(34, 197, 94, ${alpha.toFixed(2)});`
     : `background-color: rgba(220, 38, 38, ${alpha.toFixed(2)});`;
+}
+
+/**
+ * Which way a delta went, as a judgement rather than a sign.
+ *
+ * The tint and the arrow are the same statement made twice, so they are
+ * decided in one place.
+ *
+ * @returns {boolean|null} null when there is nothing to say
+ */
+function isImprovement(delta, positiveIsFaster) {
+  if (delta === null || delta === undefined || Number.isNaN(delta) || delta === 0) return null;
+  return positiveIsFaster ? delta > 0 : delta < 0;
+}
+
+/**
+ * Put an arrow next to a delta.
+ *
+ * Colour alone carries the whole meaning of these columns, which leaves out
+ * anyone who cannot separate the red from the green — around one man in twelve,
+ * on a table aimed at cyclists. The arrow says the same thing in a second
+ * channel, and reads aloud.
+ */
+function appendDirectionMark(td, better) {
+  if (better === null) return;
+
+  const mark = document.createElement('span');
+  mark.className = `diff-mark ${better ? 'diff-mark-better' : 'diff-mark-worse'}`;
+  mark.textContent = better ? '\u25b2' : '\u25bc';
+  mark.title = better ? 'Better' : 'Worse';
+  mark.setAttribute('aria-label', better ? 'better' : 'worse');
+  td.appendChild(mark);
 }
 
 /**
@@ -986,7 +1083,8 @@ const COLUMNS = [
     csvLabel: () => 'Time Difference',
     text: row => row.time_diff,
     // 60s of difference reaches full tint.
-    style: row => diffStyle(row.time_diff_seconds, false, 60)
+    style: row => diffStyle(row.time_diff_seconds, false, 60),
+    mark: row => isImprovement(row.time_diff_seconds, false)
   },
   {
     key: 'rate_1',
@@ -1008,7 +1106,8 @@ const COLUMNS = [
     text: row => row.rate_diff,
     // Speeds saturate at 5 km/h, paces at 30 s/km.
     style: row =>
-      diffStyle(row.rate_diff_value, row.rate_positive_is_faster, row.rate_positive_is_faster ? 5 : 30)
+      diffStyle(row.rate_diff_value, row.rate_positive_is_faster, row.rate_positive_is_faster ? 5 : 30),
+    mark: row => isImprovement(row.rate_diff_value, row.rate_positive_is_faster)
   },
   {
     key: 'power_1',
@@ -1032,6 +1131,7 @@ const COLUMNS = [
     // More watts is not automatically better, but it is the reading a cyclist
     // expects to see rewarded, and 50 W is a decisive gap.
     style: row => diffStyle(row.power_diff_value, true, 50),
+    mark: row => isImprovement(row.power_diff_value, true),
     when: data => hasPowerData(data.matched)
   },
   {
@@ -1087,6 +1187,7 @@ const COLUMNS = [
     text: row => row.vam_diff || 'N/A',
     // Climbing faster is better; 200 m/h is a decisive gap.
     style: row => diffStyle(row.vam_diff_value, true, 200),
+    mark: row => isImprovement(row.vam_diff_value, true),
     when: data => hasVamData(data.matched)
   },
   {
@@ -1102,6 +1203,7 @@ const COLUMNS = [
     label: () => `vs PR (${getDisplayName(1)})`,
     text: row => row.pr_diff || 'N/A',
     style: row => diffStyle(row.pr_diff_seconds, false, 60),
+    mark: row => isImprovement(row.pr_diff_seconds, false),
     when: data => hasPersonalRecords(data.matched)
   },
   {
@@ -1201,11 +1303,28 @@ function renderTableHead(columns) {
   document.getElementById('segmentsTableHead').replaceChildren(tr);
 }
 
+/**
+ * The rows the table shows: the matched list, narrowed by the filter and put
+ * in the chosen order.
+ *
+ * The summary above the table is deliberately not narrowed — it describes the
+ * ride, not the current search.
+ */
+function visibleRows(matched) {
+  const filtered = filterSegments(matched, filterText);
+  return sortState.key ? sortMatched(filtered, sortState.key, sortState.direction) : filtered;
+}
+
+function renderFilterCount(shown, total) {
+  const filtering = Boolean(filterText) && total > 0;
+  filterCount.classList.toggle('hidden', !filtering);
+  filterCount.textContent = filtering ? `Showing ${shown} of ${total} segments` : '';
+}
+
 function renderComparison(data) {
   const columns = visibleColumns(data);
-  const rows = sortState.key
-    ? sortMatched(data.matched, sortState.key, sortState.direction)
-    : data.matched;
+  const rows = visibleRows(data.matched);
+  renderFilterCount(rows.length, data.matched.length);
 
   renderTableHead(columns);
 
@@ -1217,7 +1336,10 @@ function renderComparison(data) {
 
     columns.forEach(column => {
       const td = column.build ? column.build(row) : cell(column.text(row));
-      if (!column.build && column.style) td.style.cssText = column.style(row);
+      if (!column.build) {
+        if (column.style) td.style.cssText = column.style(row);
+        if (column.mark) appendDirectionMark(td, column.mark(row));
+      }
       tr.appendChild(td);
     });
 
@@ -1597,11 +1719,9 @@ function exportAsCSV() {
     return;
   }
 
-  // Same columns the table is showing, in the same order and sort.
+  // Same columns the table is showing, in the same order, sort and filter.
   const columns = visibleColumns(comparison);
-  const rows = sortState.key
-    ? sortMatched(comparison.matched, sortState.key, sortState.direction)
-    : comparison.matched;
+  const rows = visibleRows(comparison.matched);
 
   const lines = [
     columns.map(column => csvField((column.csvLabel || column.label)())).join(',')

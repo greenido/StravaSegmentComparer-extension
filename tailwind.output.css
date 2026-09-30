@@ -260,6 +260,38 @@ body {
   color: #fbbf24;
 }
 
+/* The same page as a tab of its own: none of the popup's size limits apply,
+   which is the point — the table can be eighteen columns wide. */
+body.view-tab {
+  min-width: 0;
+  max-width: none;
+}
+
+body.view-tab #viewport {
+  max-width: 1400px;
+  max-height: none;
+  overflow-y: visible;
+}
+
+.filter-count {
+  font-size: 0.6875rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* Visible to a screen reader, not on screen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 /* Table column widths */
 .col-segment { width: 30%; }
 .col-time { width: 12%; }
@@ -274,6 +306,17 @@ body {
 /* Values stay on one line ("+6 bpm", not "+6 / bpm"); the table scrolls
    sideways instead. Only the segment name may wrap. */
 #segmentsTableBody td:not(:first-child) { white-space: nowrap; }
+
+/* The arrow beside a delta. The tint says the same thing, but colour alone
+   leaves out anyone who cannot separate red from green. */
+.diff-mark {
+  margin-left: 0.25rem;
+  font-size: 0.5625rem;
+  vertical-align: middle;
+}
+
+.diff-mark-better { color: #15803d; }
+.diff-mark-worse { color: #b91c1c; }
 
 /* Strava's medal on an effort (PR, 2nd, KOM…), next to its time. */
 .medal {

@@ -19,6 +19,18 @@
   …* under their name, and the summary offers to leave them out so no stretch of
   road is counted twice. Depends on Strava exposing where each effort sits in
   the ride; the log says on each comparison whether it could
+- **Open in tab**: takes the comparison out of the 800px popup into a
+  full-width tab. It is the same page reading the same saved comparison, so
+  nothing is fetched again
+- **Filter by name**: narrows a long ride to the segments you are looking for,
+  says how many of how many are showing, and the CSV follows what is on screen.
+  The summary and the chart stay over the whole ride
+- **Deltas are no longer colour alone**: every shaded delta carries an arrow as
+  well, which also reads aloud. The CSV keeps the plain numbers
+- **Activity stats fallback**: when the page markup yields no stats — a fetched
+  page, a layout change, a language the text heuristics do not know — they are
+  read from Strava's embedded activity data instead. The rendered page is still
+  preferred, since it is already in the athlete's own units
 
 ### 🔧 Fixes and internals
 

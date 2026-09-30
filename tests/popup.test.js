@@ -402,6 +402,174 @@ describe('segments inside other segments', () => {
   });
 });
 
+describe('reading the table without colour', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  it('marks every shaded delta with an arrow as well as a tint', () => {
+    renderComparison({
+      matched: [
+        row({
+          time_diff: '-0:15',
+          time_diff_seconds: -15,
+          power_1: '220 W',
+          power_2: '245 W',
+          power_diff: '+25 W',
+          power_diff_value: 25
+        })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const marks = [...document.querySelectorAll('#segmentsTableBody .diff-mark')];
+    // Time, rate and power deltas: faster, faster, more watts.
+    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2']);
+    expect(marks.every(mark => mark.title === 'Better')).toBe(true);
+    expect(marks[0].getAttribute('aria-label')).toBe('better');
+  });
+
+  it('says nothing about a delta of zero or one it could not read', () => {
+    renderComparison({
+      matched: [row({ time_diff: '0:00', time_diff_seconds: 0, rate_diff: 'N/A', rate_diff_value: null })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(document.querySelectorAll('#segmentsTableBody .diff-mark')).toHaveLength(0);
+  });
+
+  it('leaves the heart-rate delta unmarked, as it is unshaded', () => {
+    renderComparison({
+      matched: [row({ hr_1: '150 bpm', hr_2: '142 bpm', hr_diff: '-8 bpm', hr_diff_value: -8 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const hrCell = [...document.querySelectorAll('#segmentsTableBody td')].find(
+      td => td.firstChild.textContent === '-8 bpm'
+    );
+    expect(hrCell.querySelector('.diff-mark')).toBeNull();
+  });
+});
+
+describe('opening the comparison in a tab', () => {
+  it('opens the same page with the popup size limits lifted', async () => {
+    await loadPopup();
+
+    const opened = [];
+    chrome.tabs.create = async options => {
+      opened.push(options);
+      return { id: 99 };
+    };
+    chrome.runtime.getURL = path => `chrome-extension://abc/${path}`;
+
+    document.getElementById('openTabBtn').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(opened).toEqual([{ url: 'chrome-extension://abc/popup.html?view=tab' }]);
+  });
+
+  it('drops the clamps and its own button when it is the tab', async () => {
+    const url = new URL(window.location.href);
+    url.search = '?view=tab';
+    window.history.replaceState({}, '', url);
+
+    await loadPopup();
+
+    expect(document.body.classList.contains('view-tab')).toBe(true);
+    expect(document.getElementById('openTabBtn').classList.contains('hidden')).toBe(true);
+
+    window.history.replaceState({}, '', url.pathname);
+  });
+});
+
+describe('filtering the table', () => {
+  const names = () =>
+    [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.children[0].textContent);
+
+  const type = text => {
+    const input = document.getElementById('tableSearch');
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+  };
+
+  // Driven through a real comparison: typing re-renders from the popup's own
+  // state, as a header click does.
+  beforeEach(async () => {
+    await loadPopup();
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: tabId === 10 ? '1' : '2',
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: ['Old La Honda', 'Kings Mountain', 'Old La Honda (west)'].map((name, i) => ({
+          segmentId: String(i),
+          occurrence: 0,
+          name,
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time: `${5 + i}:00`,
+          rate: '18.0 km/h',
+          index: i
+        }))
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  });
+
+  it('narrows the table to the segments whose name matches', () => {
+    type('la honda');
+    expect(names()).toEqual(['Old La Honda', 'Old La Honda (west)']);
+
+    type('');
+    expect(names()).toHaveLength(3);
+  });
+
+  it('says how many of the segments are showing', () => {
+    type('kings');
+    expect(document.getElementById('filterCount').textContent).toBe('Showing 1 of 3 segments');
+    expect(document.getElementById('filterCount').classList.contains('hidden')).toBe(false);
+
+    type('');
+    expect(document.getElementById('filterCount').classList.contains('hidden')).toBe(true);
+  });
+
+  it('leaves the summary describing the whole ride, not the search', () => {
+    const net = document.querySelector('.summary-net').textContent;
+    type('kings');
+
+    expect(document.querySelector('.summary-net').textContent).toBe(net);
+    expect(document.querySelectorAll('.delta-chart .delta-bar')).toHaveLength(3);
+  });
+
+  it('exports what the table is showing', async () => {
+    type('kings');
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')).toHaveLength(2);
+    expect(csv).toContain('"Kings Mountain"');
+    expect(csv).not.toContain('"Old La Honda"');
+  });
+
+  it('starts a fresh comparison unfiltered', async () => {
+    type('kings');
+    await compareActivities();
+
+    expect(document.getElementById('tableSearch').value).toBe('');
+    expect(names()).toHaveLength(3);
+  });
+});
+
 describe('sorting by a column header', () => {
   const clickHeader = label => {
     const th = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>
@@ -497,8 +665,9 @@ describe('power columns', () => {
     const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
     expect(headers).toContain('Power Diff');
 
-    const cells = [...document.querySelectorAll('#segmentsTableBody tr td')].map(td => td.textContent);
-    expect(cells).toContain('+25 W');
+    const cells = [...document.querySelectorAll('#segmentsTableBody tr td')];
+    const diff = cells.find(td => td.firstChild.textContent === '+25 W');
+    expect(diff.querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('shows the segment distance under its name', () => {
@@ -581,8 +750,9 @@ describe('heart rate, VAM and medals', () => {
     });
 
     expect(headers()).toContain('VAM Diff');
-    const diff = cells().find(td => td.textContent === '+160 m/h');
+    const diff = cells().find(td => td.firstChild.textContent === '+160 m/h');
     expect(diff.style.backgroundColor).toContain('34, 197, 94');
+    expect(diff.querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it("puts Strava's medal next to the effort's time", () => {
@@ -703,8 +873,11 @@ describe('comparing two activities that are already open', () => {
     const rows = document.querySelectorAll('#segmentsTableBody tr');
 
     expect(rows).toHaveLength(2);
-    expect(rows[0].children[3].textContent).toBe('+0:05');
-    expect(rows[1].children[3].textContent).toBe('-0:10');
+    // The delta, then the arrow that repeats it without relying on colour.
+    expect(rows[0].children[3].firstChild.textContent).toBe('+0:05');
+    expect(rows[0].children[3].querySelector('.diff-mark').textContent).toBe('\u25bc');
+    expect(rows[1].children[3].firstChild.textContent).toBe('-0:10');
+    expect(rows[1].children[3].querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('shows the activity stats panels', () => {
@@ -732,6 +905,14 @@ describe('comparing two activities that are already open', () => {
 
     const [, first] = captured[0].split('\n');
     expect(first).toContain('"Mile 1"');
+  });
+
+  it('keeps the direction arrows out of the CSV', async () => {
+    const csv = await capturedCsv(() => exportAsCSV());
+
+    expect(csv).toContain('"+0:05"');
+    expect(csv).not.toContain('\u25b2');
+    expect(csv).not.toContain('\u25bc');
   });
 
   it('exports a CSV with the athlete names in the headers', async () => {
@@ -820,7 +1001,9 @@ describe('comparing against your personal records', () => {
 
     const first = document.querySelectorAll('#segmentsTableBody tr')[0];
     expect([...first.children].at(-2).textContent).toBe('4:30');
-    expect([...first.children].at(-1).textContent).toBe('+0:30');
+    // Slower than the PR, so the arrow agrees with the red tint.
+    expect([...first.children].at(-1).firstChild.textContent).toBe('+0:30');
+    expect([...first.children].at(-1).querySelector('.diff-mark').textContent).toBe('\u25bc');
   });
 
   it('shows a negative diff when the effort was itself a new PR', async () => {
@@ -829,7 +1012,8 @@ describe('comparing against your personal records', () => {
 
     // Climb 2 was ridden in 4:00 against a stored PR of 4:10.
     const second = document.querySelectorAll('#segmentsTableBody tr')[1];
-    expect([...second.children].at(-1).textContent).toBe('-0:10');
+    expect([...second.children].at(-1).firstChild.textContent).toBe('-0:10');
+    expect([...second.children].at(-1).querySelector('.diff-mark').textContent).toBe('\u25b2');
   });
 
   it('fetches each segment once and reuses the cache on the next click', async () => {
