@@ -24,7 +24,9 @@ import {
   ordinal,
   effortHistoryStats,
   applyEffortHistory,
-  hasEffortHistory
+  hasEffortHistory,
+  effortQuality,
+  hasQualityData
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -634,5 +636,71 @@ describe('applyEffortHistory', () => {
     const single = { 1: { times: [{ seconds: 290 }], effortCount: 1 } };
     expect(hasEffortHistory(applyEffortHistory(matched, single))).toBe(false);
     expect(hasEffortHistory(applyEffortHistory(matched, {}))).toBe(false);
+  });
+});
+
+describe('effortQuality', () => {
+  // Deltas are activity 2 minus activity 1: negative time is faster, negative
+  // heart rate is easier.
+  const read = (time, hr) => {
+    const quality = effortQuality(time, hr);
+    return quality && quality.key;
+  };
+
+  it('calls a faster time at a lower or equal heart rate fitness', () => {
+    expect(read(-20, -6)).toBe('fitness');
+    expect(read(-20, 0)).toBe('fitness');
+    expect(read(-20, 2)).toBe('fitness'); // within the heart-rate tolerance
+  });
+
+  it('calls a faster time bought with a higher heart rate effort', () => {
+    expect(read(-20, 8)).toBe('effort');
+  });
+
+  it('separates slower-but-easier from slower-while-working-harder', () => {
+    expect(read(30, -10)).toBe('easier');
+    expect(read(30, 0)).toBe('slower');
+    expect(read(30, 10)).toBe('fading');
+  });
+
+  it('reads the same time at a lower heart rate as fitness too', () => {
+    expect(read(0, -8)).toBe('fitness');
+    expect(read(0, 8)).toBe('effort');
+    expect(read(0, 0)).toBe('even');
+  });
+
+  it('treats a second and a couple of beats as noise, not a signal', () => {
+    expect(read(1, 2)).toBe('even');
+    expect(read(-1, -2)).toBe('even');
+  });
+
+  it('explains itself in words, for the tooltip', () => {
+    expect(effortQuality(-20, -6).title).toBe('Faster at a lower heart rate');
+    expect(effortQuality(30, 10).title).toBe('Slower at a higher heart rate');
+    expect(effortQuality(0, 0).title).toBe('Same time at the same heart rate');
+  });
+
+  it('says nothing when either reading is missing', () => {
+    expect(effortQuality(-20, null)).toBeNull();
+    expect(effortQuality(null, -6)).toBeNull();
+    expect(effortQuality(NaN, 0)).toBeNull();
+  });
+});
+
+describe('hasQualityData', () => {
+  it('is true only once a segment has both readings', () => {
+    const withBoth = compareSegmentLists(
+      [{ segmentId: '1', name: 'A', time: '5:00', heartRate: '150 bpm' }],
+      [{ segmentId: '1', name: 'A', time: '4:40', heartRate: '142 bpm' }]
+    );
+    expect(hasQualityData(withBoth.matched)).toBe(true);
+    expect(withBoth.matched[0].quality.key).toBe('fitness');
+
+    const noHr = compareSegmentLists(
+      [{ segmentId: '1', name: 'A', time: '5:00' }],
+      [{ segmentId: '1', name: 'A', time: '4:40' }]
+    );
+    expect(hasQualityData(noHr.matched)).toBe(false);
+    expect(noHr.matched[0].quality).toBeNull();
   });
 });

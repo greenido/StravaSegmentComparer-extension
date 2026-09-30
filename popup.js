@@ -789,6 +789,23 @@ function buildNameCell(row) {
   return td;
 }
 
+/** The reading of time against heart rate, as a tinted word. */
+function buildQualityCell(row) {
+  const td = document.createElement('td');
+  if (!row.quality) {
+    td.textContent = 'N/A';
+    return td;
+  }
+
+  const badge = document.createElement('span');
+  badge.className = `quality quality-${row.quality.key}`;
+  badge.textContent = row.quality.label;
+  badge.title = row.quality.title;
+  td.appendChild(badge);
+
+  return td;
+}
+
 /* ------------------------------------------------------------------ *
  * Your history on a segment
  * ------------------------------------------------------------------ */
@@ -998,6 +1015,15 @@ const COLUMNS = [
     when: data => hasHeartRateData(data.matched)
   },
   {
+    key: 'quality',
+    className: 'col-quality',
+    label: () => 'Form',
+    headerTitle: () => 'What the time change means once heart rate is taken into account',
+    build: buildQualityCell,
+    text: row => (row.quality ? row.quality.label : 'N/A'),
+    when: data => hasQualityData(data.matched)
+  },
+  {
     key: 'vam_1',
     className: 'col-vam',
     label: () => `VAM (${getDisplayName(1)})`,
@@ -1065,6 +1091,8 @@ const DEFAULT_SORT_DIRECTION = {
   hr_1: 'desc',
   hr_2: 'desc',
   hr_diff: 'desc',
+  // Best reading first.
+  quality: 'asc',
   vam_1: 'desc',
   vam_2: 'desc',
   vam_diff: 'desc',
@@ -1090,6 +1118,9 @@ function renderTableHead(columns) {
     const th = document.createElement('th');
     if (column.className) th.className = column.className;
     th.textContent = column.label();
+    // A column whose heading needs explaining says so; the rest get the hint
+    // that they can be sorted.
+    if (column.headerTitle) th.title = column.headerTitle();
 
     if (!isSortable(column.key)) {
       tr.appendChild(th);
@@ -1100,7 +1131,7 @@ function renderTableHead(columns) {
     th.classList.add('sortable');
     th.tabIndex = 0;
     th.setAttribute('role', 'button');
-    th.title = `Sort by ${column.label()}`;
+    if (!column.headerTitle) th.title = `Sort by ${column.label()}`;
     th.setAttribute(
       'aria-sort',
       active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none'

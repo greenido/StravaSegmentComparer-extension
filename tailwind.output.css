@@ -268,6 +268,7 @@ body {
 .col-power { width: 10%; }
 .col-hr { width: 9%; }
 .col-vam { width: 10%; }
+.col-quality { width: 9%; }
 .col-history { width: 11%; }
 
 /* Values stay on one line ("+6 bpm", not "+6 / bpm"); the table scrolls
@@ -287,6 +288,25 @@ body {
   background-color: #fde68a;
   vertical-align: middle;
 }
+
+/* The reading of a time change against the heart-rate change behind it. The
+   word carries the meaning; the tint only reinforces it. */
+.quality {
+  display: inline-block;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+.quality-fitness { color: #166534; background-color: #dcfce7; }
+.quality-effort  { color: #9a3412; background-color: #ffedd5; }
+.quality-even    { color: #4b5563; background-color: #f3f4f6; }
+.quality-easier  { color: #1e40af; background-color: #dbeafe; }
+.quality-slower  { color: #92400e; background-color: #fef3c7; }
+.quality-fading  { color: #991b1b; background-color: #fee2e2; }
 
 /* Your efforts on a segment over time: rank, then the progression. Faster is
    higher, and the dot is your best. */

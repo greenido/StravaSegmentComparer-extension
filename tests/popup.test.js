@@ -393,6 +393,44 @@ describe('heart rate, VAM and medals', () => {
     expect(cells().map(td => td.textContent)).toContain('+5 bpm');
   });
 
+  it('reads the time change against the heart-rate change in a Form column', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+    expect(headers()).not.toContain('Form');
+
+    renderComparison({
+      matched: [
+        row({
+          hr_1: '150 bpm',
+          hr_2: '142 bpm',
+          hr_diff: '-8 bpm',
+          hr_diff_value: -8,
+          // 15 s faster on 8 fewer beats.
+          quality: { key: 'fitness', label: 'Fitness', title: 'Faster at a lower heart rate' }
+        })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    expect(headers()).toContain('Form');
+    const badge = document.querySelector('.quality');
+    expect(badge.textContent).toBe('Fitness');
+    expect(badge.classList.contains('quality-fitness')).toBe(true);
+    expect(badge.title).toBe('Faster at a lower heart rate');
+  });
+
+  it('explains the Form heading rather than telling it to sort', () => {
+    renderComparison({
+      matched: [row({ hr_1: '150 bpm', hr_diff_value: -8, quality: { key: 'even', label: 'Even', title: 'x' } })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const th = [...document.querySelectorAll('#segmentsTable thead th')].find(h => h.textContent === 'Form');
+    expect(th.title).toContain('heart rate');
+    expect(th.classList.contains('sortable')).toBe(true);
+  });
+
   it('shows VAM columns for climbs, with a faster climb shaded green', () => {
     renderComparison({
       matched: [row({ vam_1: '800 m/h', vam_2: '960 m/h', vam_diff: '+160 m/h', vam_diff_value: 160 })],

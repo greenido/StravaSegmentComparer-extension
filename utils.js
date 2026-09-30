@@ -254,6 +254,67 @@ function achievementLabel(achievement) {
   return label ? { label, description: achievement.description || null } : null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Reading time against heart rate
+ * ------------------------------------------------------------------ */
+
+// Below these, a reading is noise: a second of timing and a couple of beats
+// are within the spread of riding the same segment the same way twice.
+const QUALITY_TIME_TOLERANCE_S = 1;
+const QUALITY_HR_TOLERANCE_BPM = 2;
+
+const QUALITY_READINGS = {
+  fitness: 'Fitness',
+  effort: 'Effort',
+  even: 'Even',
+  easier: 'Easier',
+  slower: 'Slower',
+  fading: 'Fading'
+};
+
+// Most encouraging reading to least, for sorting. Not a claim that "Effort"
+// beats "Even" as a ride — only an order the column can be sorted in.
+const QUALITY_ORDER = ['fitness', 'effort', 'even', 'easier', 'slower', 'fading'];
+
+/**
+ * What a time change means once heart rate is taken into account.
+ *
+ * A faster time at a lower heart rate is a different thing from a faster time
+ * at a higher one: the first is fitness, the second is effort. Neither column
+ * says this on its own, which is why the heart-rate delta is left unshaded, so
+ * the reading gets a column of its own.
+ *
+ * Both deltas are activity 2 minus activity 1: negative time is faster,
+ * negative heart rate is easier.
+ *
+ * @returns {{key: string, label: string, title: string}|null} null when either
+ *   reading is missing
+ */
+function effortQuality(timeDiffSeconds, hrDiff) {
+  if (!Number.isFinite(timeDiffSeconds) || !Number.isFinite(hrDiff)) return null;
+
+  const sign = (value, tolerance) => (value < -tolerance ? -1 : value > tolerance ? 1 : 0);
+  const time = sign(timeDiffSeconds, QUALITY_TIME_TOLERANCE_S);
+  const heart = sign(hrDiff, QUALITY_HR_TOLERANCE_BPM);
+
+  const pace = { '-1': 'Faster', 0: 'Same time', 1: 'Slower' }[String(time)];
+  const effort = { '-1': 'at a lower heart rate', 0: 'at the same heart rate', 1: 'at a higher heart rate' }[
+    String(heart)
+  ];
+
+  let key;
+  if (time < 0) key = heart > 0 ? 'effort' : 'fitness';
+  else if (time === 0) key = heart < 0 ? 'fitness' : heart > 0 ? 'effort' : 'even';
+  else key = heart < 0 ? 'easier' : heart > 0 ? 'fading' : 'slower';
+
+  return { key, label: QUALITY_READINGS[key], title: `${pace} ${effort}` };
+}
+
+/** True when at least one matched segment could be read this way. */
+function hasQualityData(matched) {
+  return (matched || []).some(row => row.quality && row.quality.key);
+}
+
 /**
  * Stable key for pairing a segment effort across two activities.
  *
@@ -338,6 +399,7 @@ function compareSegmentLists(segments1, segments2) {
       hr_2: segment2.heartRate || 'N/A',
       hr_diff: formatSignedDiff(hrDiff, 'bpm'),
       hr_diff_value: hrDiff,
+      quality: effortQuality(timeDiffSeconds, hrDiff),
       vam_1: formatVam(vam1),
       vam_2: formatVam(vam2),
       vam_diff: formatSignedDiff(vamDiff, 'm/h'),
@@ -464,6 +526,7 @@ const SORT_ACCESSORS = {
   hr_1: row => parseHeartRate(row.hr_1),
   hr_2: row => parseHeartRate(row.hr_2),
   hr_diff: row => row.hr_diff_value,
+  quality: row => (row.quality ? QUALITY_ORDER.indexOf(row.quality.key) : null),
   vam_1: row => parseFloat(row.vam_1),
   vam_2: row => parseFloat(row.vam_2),
   vam_diff: row => row.vam_diff_value,
@@ -682,6 +745,8 @@ if (typeof module !== 'undefined' && module.exports) {
     achievementLabel,
     hasHeartRateData,
     hasVamData,
+    effortQuality,
+    hasQualityData,
     compareRates,
     segmentKey,
     compareSegmentLists,
