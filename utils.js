@@ -500,6 +500,30 @@ function summarizeComparison(matched) {
   };
 }
 
+/**
+ * The running total of the per-segment deltas, in course order.
+ *
+ * The net number says the ride was ninety seconds slower; this says where those
+ * ninety seconds went — a steady drip, or one climb. Rows that could not be
+ * compared are skipped rather than counted as zero, so a gap in the data does
+ * not flatten the line.
+ *
+ * Always built from the matched list in activity 1 page order, which is course
+ * order, whatever the table happens to be sorted by.
+ *
+ * @returns {Array<{name: string, delta: number, cumulative: number}>}
+ */
+function cumulativeTimeDeltas(matched) {
+  let running = 0;
+
+  return (matched || [])
+    .filter(row => typeof row.time_diff_seconds === 'number' && !Number.isNaN(row.time_diff_seconds))
+    .map(row => {
+      running += row.time_diff_seconds;
+      return { name: row.name, delta: row.time_diff_seconds, cumulative: running };
+    });
+}
+
 /* ------------------------------------------------------------------ *
  * Sorting
  * ------------------------------------------------------------------ */
@@ -754,6 +778,7 @@ if (typeof module !== 'undefined' && module.exports) {
     hasPowerData,
     hasPersonalRecords,
     summarizeComparison,
+    cumulativeTimeDeltas,
     rateSortValue,
     isSortable,
     sortMatched,

@@ -1207,6 +1207,78 @@ function summaryChip(row) {
   return chip;
 }
 
+const CHART_WIDTH = 320;
+const CHART_HEIGHT = 56;
+const CHART_PADDING = 4;
+
+/**
+ * Where the gap opened up, as one bar per segment in course order.
+ *
+ * Each bar is the running total after that segment, so the shape answers a
+ * question the net number cannot: whether the time went in one place or
+ * everywhere. Above the zero line is behind, below is ahead — the same red and
+ * green as the table, so the colour is reinforcement rather than the only clue.
+ */
+function buildDeltaChart(points) {
+  if (points.length < 2) return null;
+
+  const values = points.map(point => point.cumulative);
+  // Zero is always in the domain, so the baseline is where it really is.
+  const top = Math.max(0, ...values);
+  const bottom = Math.min(0, ...values);
+  const span = top - bottom || 1;
+
+  const usableWidth = CHART_WIDTH - CHART_PADDING * 2;
+  const usableHeight = CHART_HEIGHT - CHART_PADDING * 2;
+  const y = value => CHART_PADDING + (usableHeight * (top - value)) / span;
+  const slot = usableWidth / points.length;
+  const barWidth = Math.max(1, slot - Math.min(2, slot * 0.25));
+
+  const svg = svgElement('svg', {
+    class: 'delta-chart',
+    viewBox: `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`,
+    preserveAspectRatio: 'none',
+    role: 'img',
+    'aria-label':
+      `Running time difference over ${points.length} segments, ` +
+      `ending at ${formatTimeDiff(values[values.length - 1])}`
+  });
+
+  const zero = y(0);
+  points.forEach((point, index) => {
+    const value = point.cumulative;
+    const height = Math.abs(y(value) - zero);
+
+    const bar = svgElement('rect', {
+      class: value > 0 ? 'delta-bar delta-bar-loss' : 'delta-bar delta-bar-gain',
+      x: (CHART_PADDING + index * slot).toFixed(1),
+      y: (value > 0 ? y(value) : zero).toFixed(1),
+      width: barWidth.toFixed(1),
+      // A segment that leaves the running total at zero still gets a hairline,
+      // so the bar count matches the segment count.
+      height: Math.max(0.5, height).toFixed(1)
+    });
+
+    const label = svgElement('title', {});
+    label.textContent = `${point.name}: ${formatTimeDiff(value)} after this segment`;
+    bar.appendChild(label);
+
+    svg.appendChild(bar);
+  });
+
+  svg.appendChild(
+    svgElement('line', {
+      class: 'delta-zero',
+      x1: CHART_PADDING,
+      x2: CHART_WIDTH - CHART_PADDING,
+      y1: zero.toFixed(1),
+      y2: zero.toFixed(1)
+    })
+  );
+
+  return svg;
+}
+
 function summaryRow(title, rows) {
   if (!rows.length) return null;
 
@@ -1267,6 +1339,20 @@ function renderSummary(data) {
     (summary.evenCount ? `, level on ${summary.evenCount}` : '') +
     (summary.compared < summary.total ? ` · ${summary.total - summary.compared} not comparable` : '');
   panel.appendChild(counts);
+
+  const chart = buildDeltaChart(cumulativeTimeDeltas(data.matched));
+  if (chart) {
+    const figure = document.createElement('div');
+    figure.className = 'delta-chart-figure';
+    figure.appendChild(chart);
+
+    const caption = document.createElement('div');
+    caption.className = 'delta-chart-caption';
+    caption.textContent = `Running total along the course · above the line, ${getDisplayName(2)} is behind`;
+    figure.appendChild(caption);
+
+    panel.appendChild(figure);
+  }
 
   const losses = summaryRow('Biggest losses', summary.biggestLosses);
   if (losses) panel.appendChild(losses);

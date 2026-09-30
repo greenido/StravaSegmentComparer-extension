@@ -26,7 +26,8 @@ import {
   applyEffortHistory,
   hasEffortHistory,
   effortQuality,
-  hasQualityData
+  hasQualityData,
+  cumulativeTimeDeltas
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -702,5 +703,36 @@ describe('hasQualityData', () => {
     );
     expect(hasQualityData(noHr.matched)).toBe(false);
     expect(noHr.matched[0].quality).toBeNull();
+  });
+});
+
+describe('cumulativeTimeDeltas', () => {
+  const rows = [
+    { name: 'Flat run-in', time_diff_seconds: 5 },
+    { name: 'The climb', time_diff_seconds: 70 },
+    { name: 'Descent', time_diff_seconds: -20 }
+  ];
+
+  it('adds the deltas up in course order', () => {
+    expect(cumulativeTimeDeltas(rows)).toEqual([
+      { name: 'Flat run-in', delta: 5, cumulative: 5 },
+      { name: 'The climb', delta: 70, cumulative: 75 },
+      { name: 'Descent', delta: -20, cumulative: 55 }
+    ]);
+  });
+
+  it('skips a segment it could not compare rather than counting it as zero', () => {
+    const withGap = [rows[0], { name: 'Unreadable', time_diff_seconds: null }, rows[1]];
+    expect(cumulativeTimeDeltas(withGap).map(p => p.name)).toEqual(['Flat run-in', 'The climb']);
+    expect(cumulativeTimeDeltas(withGap).at(-1).cumulative).toBe(75);
+  });
+
+  it('ends on the same number the summary reports as the net', () => {
+    expect(cumulativeTimeDeltas(rows).at(-1).cumulative).toBe(summarizeComparison(rows).netSeconds);
+  });
+
+  it('survives an empty or missing list', () => {
+    expect(cumulativeTimeDeltas([])).toEqual([]);
+    expect(cumulativeTimeDeltas(null)).toEqual([]);
   });
 });

@@ -258,6 +258,48 @@ describe('the summary strip', () => {
 
     expect(document.getElementById('summarySection').children).toHaveLength(0);
   });
+
+  it('charts the running total, one bar per comparable segment', () => {
+    renderComparison({
+      matched: [
+        row({ name: 'Run-in', time_diff_seconds: 5 }),
+        row({ name: 'The climb', time_diff_seconds: 70 }),
+        row({ name: 'Unreadable', time_diff_seconds: null }),
+        row({ name: 'Descent', time_diff_seconds: -20 })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const bars = document.querySelectorAll('.delta-chart .delta-bar');
+    expect(bars).toHaveLength(3);
+    // Running totals of +5, +1:15, +0:55 — all behind, so all red.
+    expect([...bars].every(bar => bar.classList.contains('delta-bar-loss'))).toBe(true);
+    expect(bars[1].querySelector('title').textContent).toBe('The climb: +1:15 after this segment');
+    expect(document.querySelector('.delta-chart').getAttribute('aria-label')).toContain('ending at +0:55');
+  });
+
+  it('draws a segment that puts the rider ahead below the line, in green', () => {
+    renderComparison({
+      matched: [
+        row({ name: 'Sprint', time_diff_seconds: -30 }),
+        row({ name: 'Climb', time_diff_seconds: 10 })
+      ],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const bars = document.querySelectorAll('.delta-chart .delta-bar');
+    // Still ahead overall after the climb (-0:20), so both bars are gains.
+    expect([...bars].map(bar => bar.classList.contains('delta-bar-gain'))).toEqual([true, true]);
+    // A gain hangs below the zero line: the taller bar starts at the same y.
+    expect(Number(bars[0].getAttribute('y'))).toBeCloseTo(Number(bars[1].getAttribute('y')), 1);
+  });
+
+  it('skips the chart when a single segment would make it pointless', () => {
+    renderComparison({ matched: [row({ time_diff_seconds: 5 })], onlyIn1: [], onlyIn2: [] });
+    expect(document.querySelector('.delta-chart')).toBeNull();
+  });
 });
 
 describe('sorting by a column header', () => {
