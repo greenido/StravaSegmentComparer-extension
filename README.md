@@ -172,9 +172,10 @@ API and exercises the full comparison and rendering path.
 ### Styles
 
 `tailwind.output.css` is **hand-maintained plain CSS** — a small subset of
-Tailwind-style utilities plus the extension's own component classes. It is not
-generated from `tailwind.css`, so do not overwrite it with a Tailwind build;
-edit it directly.
+Tailwind-style utilities plus the extension's own component classes. Edit it
+directly. There is no CSS build step and no Tailwind dependency: the name is
+historical, and a `tailwind.css` source, a Tailwind config and a PostCSS config
+all used to sit here without ever being run.
 
 Project structure (selected):
 
