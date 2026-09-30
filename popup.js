@@ -442,6 +442,10 @@ const LEGACY_PR_CACHE_KEY = 'prCache';
 const HISTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const HISTORY_FETCH_CONCURRENCY = 3;
 const HISTORY_MAX_SEGMENTS = 60;
+// How often the cache is written back while a run is in progress. Also the
+// progress-message cadence, so the number the user sees and the number that is
+// safely stored are the same.
+const HISTORY_FLUSH_EVERY = 5;
 // Breathing room between requests, so a 60-segment ride is a steady trickle
 // rather than a burst at Strava.
 const HISTORY_FETCH_SPACING_MS = 250;
@@ -459,6 +463,11 @@ async function readHistoryCache() {
   });
 
   return fresh;
+}
+
+/** Write the cache back, dropping nothing that is already in it. */
+function persistHistoryCache(cache) {
+  return chrome.storage.local.set({ [HISTORY_CACHE_KEY]: cache });
 }
 
 /** Distinct segment ids, capped at what one click may look up. */
@@ -486,25 +495,36 @@ async function fetchSegmentHistories(segmentIds) {
   await withProxyTab(async tabId => {
     let done = 0;
 
-    await mapWithLimit(missing, HISTORY_FETCH_CONCURRENCY, async segmentId => {
-      try {
-        const response = unwrap(
-          await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentHistory', segmentId })
-        );
-        if (response.historyError) historyErrors.push(response.historyError);
-        cache[segmentId] = { pr: response.pr || null, recent: response.recent || null, fetchedAt: Date.now() };
-      } catch (error) {
-        // Cache the miss too, so one bad segment is not retried on every click.
-        addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-        cache[segmentId] = { pr: null, recent: null, fetchedAt: Date.now() };
-      }
+    try {
+      await mapWithLimit(missing, HISTORY_FETCH_CONCURRENCY, async segmentId => {
+        try {
+          const response = unwrap(
+            await chrome.tabs.sendMessage(tabId, { action: 'fetchSegmentHistory', segmentId })
+          );
+          if (response.historyError) historyErrors.push(response.historyError);
+          cache[segmentId] = { pr: response.pr || null, recent: response.recent || null, fetchedAt: Date.now() };
+        } catch (error) {
+          // Cache the miss too, so one bad segment is not retried on every click.
+          addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
+          cache[segmentId] = { pr: null, recent: null, fetchedAt: Date.now() };
+        }
 
-      done += 1;
-      if (done % 5 === 0 || done === missing.length) {
-        showStatus(`Read ${done}/${missing.length} segment histories...`, 'loading');
-      }
-      if (done < missing.length) await delay(HISTORY_FETCH_SPACING_MS);
-    });
+        done += 1;
+        if (done % HISTORY_FLUSH_EVERY === 0 || done === missing.length) {
+          showStatus(`Read ${done}/${missing.length} segment histories...`, 'loading');
+          // Saved as we go: a 60-segment ride takes half a minute, and the
+          // popup — with this whole run in it — is destroyed the moment the
+          // user clicks away. Whatever has been read by then is kept, so the
+          // next click resumes instead of starting over.
+          await persistHistoryCache(cache);
+        }
+        if (done < missing.length) await delay(HISTORY_FETCH_SPACING_MS);
+      });
+    } finally {
+      // Also keep it when the run is cut short by an error, not only when a
+      // batch boundary happens to fall at the end.
+      await persistHistoryCache(cache);
+    }
   });
 
   // One line, not one per segment: it is almost always the same reason.
@@ -516,7 +536,6 @@ async function fetchSegmentHistories(segmentIds) {
     );
   }
 
-  await chrome.storage.local.set({ [HISTORY_CACHE_KEY]: cache });
   await chrome.storage.local.remove(LEGACY_PR_CACHE_KEY);
   return cache;
 }
