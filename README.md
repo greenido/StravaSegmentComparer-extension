@@ -188,13 +188,15 @@ Project structure (selected):
 ## Privacy
 
 - No network requests to external servers are made by the extension
-- Reads only Strava activity pages and your open tabs’ URLs (for auto-detection)
+- Reads only Strava activity pages and the URLs of your open Strava tabs (for
+  auto-detection). The extension holds no `tabs` permission, so tabs on other
+  sites are invisible to it — `host_permissions` limits it to `www.strava.com`
 - Comparison results are stored with `chrome.storage.local` to auto-restore the last view
 
 ## Troubleshooting
 
 - “No segments found”: Make sure you’re on an activity page that has segments and let the page fully load. Click Compare again
-- Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages and the extension has the `tabs` permission
+- Auto-detect didn’t find tabs: Ensure your tabs are `https://www.strava.com/activities/<id>` pages. Only Strava tabs are visible to the extension
 - “Redirected away from the activity page”: You’re signed out, or the activity is private. Open it in a tab and compare again
 - Athlete names missing or “unknown”: Not all pages expose the same metadata; this is expected sometimes
 - “No personal records found”: You are either not signed in, or signed in as an athlete who has not ridden these segments. The PR columns stay hidden rather than filling with N/A

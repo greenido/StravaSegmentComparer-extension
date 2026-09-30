@@ -3,7 +3,7 @@
   "name": "Strava Segment Comparator",
   "version": "2.7",
   "description": "Compare segments between two Strava activities",
-  "permissions": ["tabs", "storage"],
+  "permissions": ["storage"],
   "host_permissions": ["https://www.strava.com/*"],
   "action": {
     "default_popup": "popup.html",
