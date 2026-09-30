@@ -14,6 +14,8 @@ If you have questions or issues, please open an issue on GitHub.
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
 - **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
 - **Sortable columns**: Click a header to sort; click again to reverse
+- **Filter by name**: Narrow a long ride to the segments you care about; the export follows what is shown
+- **Open in tab**: Take the comparison out of the popup into a full-width tab, no refetching
 - **Rides and runs**: Compares speed for rides and pace for runs, and normalizes across km/h vs mph and /km vs /mi. Runs no longer need to be open in a tab
 - **Power and heart rate**: Average power and heart rate per segment and their deltas, each shown when either activity recorded it
 - **VAM**: Metres climbed per hour on segments averaging 3% or steeper, and the delta
@@ -32,7 +34,8 @@ If you have questions or issues, please open an issue on GitHub.
 - **Persistent results**: The last comparison is auto-restored on popup open
 - **Detailed logs**: Built-in activity log with statuses and errors; quick Clear button
 
-Note: The current UI does not provide interactive table filtering. The comparison table is a simple, readable table with colored time and speed/pace deltas, sortable by any column.
+The comparison table is a plain, readable table, sortable by any column, with
+time and speed/pace deltas shown as both a colour and an arrow.
 
 ## Install (Load Unpacked)
 

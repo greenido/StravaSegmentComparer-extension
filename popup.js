@@ -31,6 +31,8 @@ const autoDetectBtn = document.getElementById('autoDetectBtn');
 const myActivitiesBtn = document.getElementById('myActivitiesBtn');
 const myActivitiesSection = document.getElementById('myActivitiesSection');
 const openTabBtn = document.getElementById('openTabBtn');
+const tableSearch = document.getElementById('tableSearch');
+const filterCount = document.getElementById('filterCount');
 const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
 const versionSpan = document.getElementById('version');
@@ -51,6 +53,9 @@ let sortState = { key: null, direction: 'desc' };
 // Whether the summary counts segments that sit inside other segments. A view
 // choice like the sort, so it is not saved with the comparison.
 let excludeNested = false;
+
+// Substring the table is narrowed to, by segment name. Also a view choice.
+let filterText = '';
 
 /* ------------------------------------------------------------------ *
  * Startup
@@ -81,6 +86,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   openTabBtn.addEventListener('click', openInTab);
+  tableSearch.addEventListener('input', () => {
+    filterText = tableSearch.value.trim();
+    renderComparison(comparison);
+  });
   clearBtn.addEventListener('click', clearResults);
 
   restoreState();
@@ -116,6 +125,9 @@ async function clearResults() {
 
   comparison = { matched: [], onlyIn1: [], onlyIn2: [] };
   sortState = { key: null, direction: 'desc' };
+  filterText = '';
+  tableSearch.value = '';
+  filterCount.classList.add('hidden');
   document.getElementById('segmentsTableBody').replaceChildren();
   document.getElementById('segmentsTableHead').replaceChildren();
   document.getElementById('summarySection').replaceChildren();
@@ -437,6 +449,8 @@ async function compareActivities() {
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
     excludeNested = false;
+    filterText = '';
+    tableSearch.value = '';
     lastStats = { stats1: activity1Data.activityStats, stats2: activity2Data.activityStats };
 
     if (!comparison.matched.length) {
@@ -1272,11 +1286,28 @@ function renderTableHead(columns) {
   document.getElementById('segmentsTableHead').replaceChildren(tr);
 }
 
+/**
+ * The rows the table shows: the matched list, narrowed by the filter and put
+ * in the chosen order.
+ *
+ * The summary above the table is deliberately not narrowed — it describes the
+ * ride, not the current search.
+ */
+function visibleRows(matched) {
+  const filtered = filterSegments(matched, filterText);
+  return sortState.key ? sortMatched(filtered, sortState.key, sortState.direction) : filtered;
+}
+
+function renderFilterCount(shown, total) {
+  const filtering = Boolean(filterText) && total > 0;
+  filterCount.classList.toggle('hidden', !filtering);
+  filterCount.textContent = filtering ? `Showing ${shown} of ${total} segments` : '';
+}
+
 function renderComparison(data) {
   const columns = visibleColumns(data);
-  const rows = sortState.key
-    ? sortMatched(data.matched, sortState.key, sortState.direction)
-    : data.matched;
+  const rows = visibleRows(data.matched);
+  renderFilterCount(rows.length, data.matched.length);
 
   renderTableHead(columns);
 
@@ -1671,11 +1702,9 @@ function exportAsCSV() {
     return;
   }
 
-  // Same columns the table is showing, in the same order and sort.
+  // Same columns the table is showing, in the same order, sort and filter.
   const columns = visibleColumns(comparison);
-  const rows = sortState.key
-    ? sortMatched(comparison.matched, sortState.key, sortState.direction)
-    : comparison.matched;
+  const rows = visibleRows(comparison.matched);
 
   const lines = [
     columns.map(column => csvField((column.csvLabel || column.label)())).join(',')

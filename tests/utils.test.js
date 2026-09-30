@@ -28,7 +28,8 @@ import {
   effortQuality,
   hasQualityData,
   cumulativeTimeDeltas,
-  markNestedSegments
+  markNestedSegments,
+  filterSegments
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -814,5 +815,36 @@ describe('leaving nested segments out of the summary', () => {
       segments2
     );
     expect(summarizeComparison(flat.matched).nestedCount).toBe(0);
+  });
+});
+
+describe('filterSegments', () => {
+  const matched = [
+    { name: 'Old La Honda' },
+    { name: 'Kings Mountain' },
+    { name: 'old la honda (west)' },
+    { name: null }
+  ];
+
+  it('matches part of a name, ignoring case', () => {
+    expect(filterSegments(matched, 'la honda').map(r => r.name)).toEqual([
+      'Old La Honda',
+      'old la honda (west)'
+    ]);
+  });
+
+  it('ignores whitespace around what was typed', () => {
+    expect(filterSegments(matched, '  kings ')).toHaveLength(1);
+  });
+
+  it('returns everything for an empty filter, not nothing', () => {
+    expect(filterSegments(matched, '')).toHaveLength(4);
+    expect(filterSegments(matched, '   ')).toHaveLength(4);
+    expect(filterSegments(matched, null)).toHaveLength(4);
+  });
+
+  it('survives a row with no name and a filter that matches nothing', () => {
+    expect(filterSegments(matched, 'zzz')).toEqual([]);
+    expect(filterSegments(null, 'x')).toEqual([]);
   });
 });

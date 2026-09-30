@@ -485,6 +485,91 @@ describe('opening the comparison in a tab', () => {
   });
 });
 
+describe('filtering the table', () => {
+  const names = () =>
+    [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.children[0].textContent);
+
+  const type = text => {
+    const input = document.getElementById('tableSearch');
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+  };
+
+  // Driven through a real comparison: typing re-renders from the popup's own
+  // state, as a header click does.
+  beforeEach(async () => {
+    await loadPopup();
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: tabId === 10 ? '1' : '2',
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: ['Old La Honda', 'Kings Mountain', 'Old La Honda (west)'].map((name, i) => ({
+          segmentId: String(i),
+          occurrence: 0,
+          name,
+          link: 'https://www.strava.com/activities/1/segments/1',
+          time: `${5 + i}:00`,
+          rate: '18.0 km/h',
+          index: i
+        }))
+      }
+    });
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  });
+
+  it('narrows the table to the segments whose name matches', () => {
+    type('la honda');
+    expect(names()).toEqual(['Old La Honda', 'Old La Honda (west)']);
+
+    type('');
+    expect(names()).toHaveLength(3);
+  });
+
+  it('says how many of the segments are showing', () => {
+    type('kings');
+    expect(document.getElementById('filterCount').textContent).toBe('Showing 1 of 3 segments');
+    expect(document.getElementById('filterCount').classList.contains('hidden')).toBe(false);
+
+    type('');
+    expect(document.getElementById('filterCount').classList.contains('hidden')).toBe(true);
+  });
+
+  it('leaves the summary describing the whole ride, not the search', () => {
+    const net = document.querySelector('.summary-net').textContent;
+    type('kings');
+
+    expect(document.querySelector('.summary-net').textContent).toBe(net);
+    expect(document.querySelectorAll('.delta-chart .delta-bar')).toHaveLength(3);
+  });
+
+  it('exports what the table is showing', async () => {
+    type('kings');
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')).toHaveLength(2);
+    expect(csv).toContain('"Kings Mountain"');
+    expect(csv).not.toContain('"Old La Honda"');
+  });
+
+  it('starts a fresh comparison unfiltered', async () => {
+    type('kings');
+    await compareActivities();
+
+    expect(document.getElementById('tableSearch').value).toBe('');
+    expect(names()).toHaveLength(3);
+  });
+});
+
 describe('sorting by a column header', () => {
   const clickHeader = label => {
     const th = [...document.querySelectorAll('#segmentsTable thead th')].find(el =>

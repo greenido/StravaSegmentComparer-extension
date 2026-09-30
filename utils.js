@@ -582,6 +582,24 @@ function cumulativeTimeDeltas(matched) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Filtering
+ * ------------------------------------------------------------------ */
+
+/**
+ * Narrow the matched rows to those whose segment name contains `text`.
+ *
+ * Case and surrounding whitespace are ignored, since the text is typed while
+ * looking at a table, not composed. An empty filter returns everything rather
+ * than nothing.
+ */
+function filterSegments(matched, text) {
+  const needle = (text || '').trim().toLowerCase();
+  if (!needle) return matched || [];
+
+  return (matched || []).filter(row => (row.name || '').toLowerCase().includes(needle));
+}
+
+/* ------------------------------------------------------------------ *
  * Sorting
  * ------------------------------------------------------------------ */
 
@@ -837,6 +855,7 @@ if (typeof module !== 'undefined' && module.exports) {
     hasPersonalRecords,
     summarizeComparison,
     cumulativeTimeDeltas,
+    filterSegments,
     rateSortValue,
     isSortable,
     sortMatched,

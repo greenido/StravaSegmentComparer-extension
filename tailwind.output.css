@@ -273,6 +273,25 @@ body.view-tab #viewport {
   overflow-y: visible;
 }
 
+.filter-count {
+  font-size: 0.6875rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+/* Visible to a screen reader, not on screen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 /* Table column widths */
 .col-segment { width: 30%; }
 .col-time { width: 12%; }
