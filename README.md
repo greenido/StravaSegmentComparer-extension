@@ -29,7 +29,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **My Activities Here**: Lists your other activities on activity 1's segments, most shared first; click one to compare against it
 - **Unmatched segments**: Segments that only one activity has are listed rather than dropped
 - **Athlete-aware headers**: Uses detected athlete names for table headers when available
-- **Activity stats panels**: Shows a side-by-side comparison of key activity stats
+- **Activity stats panels**: Shows a side-by-side comparison of key activity stats, read from the page where possible and from Strava's embedded activity data when the page yields nothing
 - **CSV export**: One-click export of the comparison table
 - **Persistent results**: The last comparison is auto-restored on popup open
 - **Detailed logs**: Built-in activity log with statuses and errors; quick Clear button

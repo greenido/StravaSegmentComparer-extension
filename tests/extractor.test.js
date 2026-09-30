@@ -4,6 +4,8 @@ import {
   extractActivityId,
   extractAthleteName,
   extractActivityStats,
+  activityStatsFromData,
+  readActivityStats,
   extractSegments,
   extractActivityData,
   extractSegmentPersonalRecord,
@@ -599,5 +601,82 @@ describe('where an effort sits in the activity', () => {
   it('ignores indices that do not describe a stretch', () => {
     const [segment] = extractSegments(page([{ ...base, start_index: 500, end_index: 500 }]), '1');
     expect(segment.span).toBeNull();
+  });
+});
+
+describe('activity stats from Strava\'s own data', () => {
+  const seed = (activity, call = 'pageView.activity().set') =>
+    parse(`<script>${call}(${JSON.stringify(activity)}, { parse: true });</script>`);
+
+  it('reads the values whose units cannot depend on the athlete', () => {
+    const doc = seed({
+      moving_time: 15965,
+      elapsed_time: 16130,
+      average_watts: 130.94,
+      average_heartrate: 142.4,
+      calories: 1834.6
+    });
+
+    expect(activityStatsFromData(doc)).toEqual([
+      { label: 'Moving Time', value: '4:26:05' },
+      { label: 'Elapsed Time', value: '4:28:50' },
+      { label: 'Avg Power', value: '131 W' },
+      { label: 'Avg Heart Rate', value: '142 bpm' },
+      { label: 'Calories', value: '1835 cal' }
+    ]);
+  });
+
+  it('takes a distance or a speed only as the display string Strava wrote', () => {
+    // A bare 56780 could be metres or feet depending on the athlete's setting,
+    // so a number on its own is left out rather than guessed at.
+    expect(activityStatsFromData(seed({ distance: 56780, average_speed: 7.3 }))).toEqual([]);
+
+    const displayed = seed({
+      distance: "56.78<abbr class='unit' title='kilometers'> km</abbr>",
+      average_speed: "26.3<abbr class='unit'> km/h</abbr>"
+    });
+    expect(activityStatsFromData(displayed)).toEqual([
+      { label: 'Distance', value: '56.78 km' },
+      { label: 'Avg Speed', value: '26.3 km/h' }
+    ]);
+  });
+
+  it('reads the other shape Strava seeds the activity with', () => {
+    const doc = seed({ calories: 900 }, 'pageView.activity = new Strava.Models.Activity');
+    expect(activityStatsFromData(doc)).toEqual([{ label: 'Calories', value: '900 cal' }]);
+  });
+
+  it('treats markup in a display string as text, never as HTML', () => {
+    const hostile = seed({ distance: '<img src=x onerror="globalThis.pwnedStats = true">42 km' });
+    expect(activityStatsFromData(hostile)).toEqual([{ label: 'Distance', value: '42 km' }]);
+    expect(globalThis.pwnedStats).toBeUndefined();
+  });
+
+  it('finds nothing when the page seeds no activity', () => {
+    expect(activityStatsFromData(parse('<div>nothing here</div>'))).toEqual([]);
+  });
+});
+
+describe('readActivityStats', () => {
+  const markup = `
+    <div class="section more-stats">
+      <table><tr><td>Distance</td><td>35.28 mi</td></tr></table>
+    </div>`;
+  const data = `<script>pageView.activity().set({"calories":900}, { parse: true });</script>`;
+
+  it('prefers the rendered page, which is already in the athlete\'s units', () => {
+    const both = readActivityStats(parse(markup + data));
+    expect(both.source).toBe('markup');
+    expect(both.stats).toEqual([{ label: 'Distance', value: '35.28 mi' }]);
+  });
+
+  it('falls back to the data when the markup yields nothing', () => {
+    const only = readActivityStats(parse(data));
+    expect(only.source).toBe('data');
+    expect(only.stats).toEqual([{ label: 'Calories', value: '900 cal' }]);
+  });
+
+  it('says so when neither has anything', () => {
+    expect(readActivityStats(parse('<div></div>'))).toEqual({ stats: [], source: 'none' });
   });
 });

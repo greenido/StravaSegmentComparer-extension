@@ -442,6 +442,8 @@ async function compareActivities() {
 
     addLogEntry(`Activity #1: ${activity1Data.segments.length} segments`, 'success');
     addLogEntry(`Activity #2: ${activity2Data.segments.length} segments`, 'success');
+    logStatsSource(1, activity1Data);
+    logStatsSource(2, activity2Data);
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
@@ -468,6 +470,21 @@ async function compareActivities() {
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     compareBtn.disabled = false;
+  }
+}
+
+/**
+ * Say where the activity stats came from, when it was not the page itself.
+ *
+ * Reading the rendered markup is the normal path and stays quiet. The other two
+ * outcomes are worth a line: they are the difference between "Strava changed
+ * its layout again" and "this page never had stats to read".
+ */
+function logStatsSource(index, activity) {
+  if (activity.activityStatsSource === 'data') {
+    addLogEntry(`Activity #${index}: stats read from Strava's embedded data, not the page markup`, 'info');
+  } else if (activity.activityStatsSource === 'none') {
+    addLogEntry(`Activity #${index}: no activity stats found`, 'warning');
   }
 }
 

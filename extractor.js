@@ -195,6 +195,102 @@ function extractActivityStats(doc) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Activity stats from Strava's own data
+ * ------------------------------------------------------------------ */
+
+// The inline scripts that seed the page's activity model, in the same style as
+// the efforts data below.
+const ACTIVITY_DATA_CALLS = [/pageView\.activity\(\)\.set\(\s*/, /new Strava\.Models\.Activity\(\s*/];
+
+/**
+ * Stats worth lifting out of that data, and how to present them.
+ *
+ * `fromNumber` is only given where the unit cannot depend on the athlete's
+ * settings: seconds, watts, beats and calories read the same to everyone. A
+ * distance or a speed does not — the same ride is 56.78 km to one athlete and
+ * 35.28 mi to another — so those are taken only when Strava supplies its own
+ * display string, and left out otherwise rather than guessed at.
+ */
+const ACTIVITY_DATA_STATS = [
+  { keys: ['distance'], label: 'Distance' },
+  { keys: ['moving_time'], label: 'Moving Time', fromNumber: clockTime },
+  { keys: ['elapsed_time'], label: 'Elapsed Time', fromNumber: clockTime },
+  { keys: ['total_elevation_gain', 'elevation_gain'], label: 'Elevation' },
+  { keys: ['average_speed', 'avg_speed'], label: 'Avg Speed' },
+  { keys: ['max_speed'], label: 'Max Speed' },
+  { keys: ['average_watts', 'avg_watts'], label: 'Avg Power', fromNumber: w => `${Math.round(w)} W` },
+  { keys: ['weighted_average_watts'], label: 'Weighted Avg Power', fromNumber: w => `${Math.round(w)} W` },
+  { keys: ['kilojoules'], label: 'Energy Output', fromNumber: kj => `${Math.round(kj)} kJ` },
+  { keys: ['average_heartrate', 'avg_hr'], label: 'Avg Heart Rate', fromNumber: hr => `${Math.round(hr)} bpm` },
+  { keys: ['max_heartrate', 'max_hr'], label: 'Max Heart Rate', fromNumber: hr => `${Math.round(hr)} bpm` },
+  { keys: ['average_cadence', 'avg_cadence'], label: 'Cadence', fromNumber: c => `${Math.round(c)} rpm` },
+  { keys: ['calories'], label: 'Calories', fromNumber: c => `${Math.round(c)} cal` }
+];
+
+/** The activity's own data object from the page's inline scripts, or null. */
+function readActivityData(doc) {
+  for (const script of doc.querySelectorAll('script:not([src])')) {
+    const text = script.textContent || '';
+    for (const call of ACTIVITY_DATA_CALLS) {
+      const match = call.exec(text);
+      if (!match) continue;
+
+      const data = jsonObjectAt(text, match.index + match[0].length);
+      if (data) return data;
+    }
+  }
+  return null;
+}
+
+/**
+ * Activity stats from that data rather than from the rendered page.
+ *
+ * Used only when the markup yields nothing — a fetched page, a layout change,
+ * or a language whose labels the text heuristics do not recognise. The markup
+ * is preferred where it works because it is already in the athlete's own units
+ * and language, which this cannot be.
+ */
+function activityStatsFromData(doc) {
+  const data = readActivityData(doc);
+  if (!data) return [];
+
+  const stats = [];
+  ACTIVITY_DATA_STATS.forEach(({ keys, label, fromNumber }) => {
+    for (const key of keys) {
+      const value = data[key];
+
+      if (typeof value === 'string' && value.trim()) {
+        const text = htmlText(doc, value);
+        if (text) {
+          stats.push({ label, value: text });
+          return;
+        }
+      }
+
+      if (fromNumber && isNumber(value)) {
+        stats.push({ label, value: fromNumber(value) });
+        return;
+      }
+    }
+  });
+
+  return stats;
+}
+
+/**
+ * The activity's stats, and where they came from.
+ *
+ * @returns {{stats: Array<{label: string, value: string}>, source: 'markup'|'data'|'none'}}
+ */
+function readActivityStats(doc) {
+  const fromMarkup = extractActivityStats(doc);
+  if (fromMarkup.length) return { stats: fromMarkup, source: 'markup' };
+
+  const fromData = activityStatsFromData(doc);
+  return fromData.length ? { stats: fromData, source: 'data' } : { stats: [], source: 'none' };
+}
+
+/* ------------------------------------------------------------------ *
  * Segments
  * ------------------------------------------------------------------ */
 
@@ -487,12 +583,16 @@ function extractActivityData(doc, url) {
     throw new Error('No segments found on this activity');
   }
 
+  const stats = readActivityStats(doc);
+
   return {
     title: (doc.title || '').trim(),
     url,
     activityId,
     athleteName: extractAthleteName(doc),
-    activityStats: extractActivityStats(doc),
+    activityStats: stats.stats,
+    // Which of the two readings produced them, for the log.
+    activityStatsSource: stats.source,
     segments,
     extractionTime: new Date().toISOString()
   };
@@ -688,6 +788,9 @@ if (typeof module !== 'undefined' && module.exports) {
     extractActivityId,
     extractAthleteName,
     extractActivityStats,
+    readActivityData,
+    activityStatsFromData,
+    readActivityStats,
     extractSegments,
     extractActivityData,
     extractSegmentPersonalRecord,
