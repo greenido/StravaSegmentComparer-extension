@@ -307,12 +307,59 @@ async function waitForContentScript(tabId) {
   return false;
 }
 
+// Background tabs this page opens for its own use. Closing one in a `finally`
+// is not enough on its own: the popup is destroyed the moment the user clicks
+// away, and its `finally` blocks with it. So the service worker is kept told
+// which tabs are open, and closes whatever is left when this page's port
+// disconnects (see background.js).
+
+// Must match WORK_TABS_PORT in background.js.
+const WORK_TABS_PORT = 'workTabs';
+// The service worker is stopped after 30 seconds without an event, which would
+// take its list down with it. A message on the port counts as one.
+const WORK_TABS_HEARTBEAT_MS = 20000;
+
+const workTabIds = new Set();
+let workTabsPort = null;
+let workTabsHeartbeat = null;
+
+/** Send the service worker the full list of tabs this page has open. */
+function syncWorkTabs() {
+  if (!workTabsPort) {
+    workTabsPort = chrome.runtime.connect({ name: WORK_TABS_PORT });
+    // Reconnected, with the list sent again, on the next sync.
+    workTabsPort.onDisconnect.addListener(() => {
+      workTabsPort = null;
+    });
+  }
+  workTabsPort.postMessage({ tabIds: [...workTabIds] });
+
+  if (workTabIds.size && !workTabsHeartbeat) {
+    workTabsHeartbeat = setInterval(syncWorkTabs, WORK_TABS_HEARTBEAT_MS);
+  } else if (!workTabIds.size && workTabsHeartbeat) {
+    clearInterval(workTabsHeartbeat);
+    workTabsHeartbeat = null;
+  }
+}
+
+async function openWorkTab(url) {
+  const tab = await chrome.tabs.create({ url, active: false });
+  workTabIds.add(tab.id);
+  syncWorkTabs();
+  return tab;
+}
+
+async function closeWorkTab(tabId) {
+  // Closed before it leaves the list, so there is no moment where the tab is
+  // open and nobody would close it.
+  await chrome.tabs.remove(tabId).catch(() => {});
+  workTabIds.delete(tabId);
+  syncWorkTabs();
+}
+
 /** Last resort: open the activity in a background tab and read it there. */
 async function extractViaNewTab(activityId) {
-  const tab = await chrome.tabs.create({
-    url: `https://www.strava.com/activities/${activityId}`,
-    active: false
-  });
+  const tab = await openWorkTab(`https://www.strava.com/activities/${activityId}`);
   addLogEntry(`Opened background tab ${tab.id} for activity ${activityId}`, 'info');
 
   try {
@@ -323,7 +370,7 @@ async function extractViaNewTab(activityId) {
     return await extractFromTab(tab.id);
   } finally {
     // Always clean up, including on failure.
-    await chrome.tabs.remove(tab.id).catch(() => {});
+    await closeWorkTab(tab.id);
     addLogEntry(`Closed background tab ${tab.id}`, 'info');
   }
 }
@@ -388,7 +435,7 @@ async function withProxyTab(fn) {
     return fn(existingId);
   }
 
-  const tab = await chrome.tabs.create({ url: 'https://www.strava.com/dashboard', active: false });
+  const tab = await openWorkTab('https://www.strava.com/dashboard');
   addLogEntry(`Opened background tab ${tab.id} to reach Strava`, 'info');
 
   try {
@@ -397,7 +444,7 @@ async function withProxyTab(fn) {
     }
     return await fn(tab.id);
   } finally {
-    await chrome.tabs.remove(tab.id).catch(() => {});
+    await closeWorkTab(tab.id);
     addLogEntry(`Closed background tab ${tab.id}`, 'info');
   }
 }

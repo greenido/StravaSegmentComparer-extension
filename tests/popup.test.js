@@ -27,7 +27,8 @@ function stubChrome(overrides = {}) {
       }
     },
     runtime: {
-      getManifest: () => JSON.parse(read('manifest.json'))
+      getManifest: () => JSON.parse(read('manifest.json')),
+      connect: () => ({ postMessage: () => {}, onDisconnect: { addListener: () => {} } })
     },
     tabs: {
       query: async () => [],
@@ -944,6 +945,93 @@ describe('comparing two activities that are already open', () => {
     const [header, first] = captured[0].split('\n');
     expect(header).toContain('"Pace (Ada)"');
     expect(first).toBe('"Mile 1","5:00","5:05","+0:05","5:30 /km","5:30 /km","0:00 /km"');
+  });
+});
+
+describe('comparing two activities when no Strava tab is open', () => {
+  let opened;
+  let removed;
+  let reported;
+  let intervals;
+
+  beforeEach(async () => {
+    await loadPopup();
+    opened = {};
+    removed = [];
+    reported = [];
+    intervals = { started: [], cleared: [] };
+
+    let nextTabId = 40;
+    chrome.runtime.connect = ({ name }) => ({
+      postMessage: message => reported.push({ name, tabIds: message.tabIds }),
+      onDisconnect: { addListener: () => {} }
+    });
+    chrome.tabs.query = async () => [];
+    chrome.tabs.create = async ({ url, active }) => {
+      const id = nextTabId++;
+      opened[id] = { url, active };
+      return { id };
+    };
+    chrome.tabs.remove = async tabId => {
+      removed.push(tabId);
+    };
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      if (request.action === 'ping') return { ok: true };
+      const activityId = opened[tabId].url.split('/').pop();
+      return {
+        ok: true,
+        data: {
+          activityId,
+          athleteName: activityId === '1' ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: activityId === '1' ? '5:00' : '5:10' }]
+        }
+      };
+    };
+
+    const { setInterval: realSet, clearInterval: realClear } = globalThis;
+    globalThis.setInterval = (fn, ms) => {
+      const handle = realSet(fn, ms);
+      intervals.started.push({ handle, ms });
+      return handle;
+    };
+    globalThis.clearInterval = handle => {
+      intervals.cleared.push(handle);
+      realClear(handle);
+    };
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    try {
+      await compareActivities();
+    } finally {
+      globalThis.setInterval = realSet;
+      globalThis.clearInterval = realClear;
+    }
+  });
+
+  it('reads each activity in a background tab, then closes it', () => {
+    expect(Object.values(opened).map(tab => tab.url).sort()).toEqual([
+      'https://www.strava.com/activities/1',
+      'https://www.strava.com/activities/2'
+    ]);
+    expect(Object.values(opened).every(tab => tab.active === false)).toBe(true);
+    expect(removed.sort()).toEqual([40, 41]);
+    expect(document.getElementById('status').textContent).toBe('Successfully compared 1 segments');
+  });
+
+  it('keeps the service worker told which tabs are open, so they close even if the popup does first', () => {
+    expect(reported.every(message => message.name === 'workTabs')).toBe(true);
+    // Both were reported while open, and the list was empty again at the end.
+    expect(reported.some(message => message.tabIds.includes(40))).toBe(true);
+    expect(reported.some(message => message.tabIds.includes(41))).toBe(true);
+    expect(reported.at(-1).tabIds).toEqual([]);
+  });
+
+  it('keeps the service worker awake only while a tab is open', () => {
+    expect(intervals.started).toHaveLength(1);
+    expect(intervals.started[0].ms).toBeLessThan(30000);
+    expect(intervals.cleared).toEqual([intervals.started[0].handle]);
   });
 });
 
