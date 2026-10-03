@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   prBtn.addEventListener('click', loadPersonalRecords);
-  autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
+  autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
 
   helpBtn.addEventListener('click', e => {
@@ -117,7 +117,7 @@ async function restoreState() {
   }
 
   // Open tabs win over saved URLs.
-  autoPopulateActivityUrls();
+  autoPopulateActivityUrls({ quiet: true });
 }
 
 async function clearResults() {
@@ -191,16 +191,28 @@ async function findActivityTabs() {
     .sort((a, b) => a.id - b.id);
 }
 
-async function autoPopulateActivityUrls() {
+/**
+ * Fill the URL fields from the open activity tabs.
+ *
+ * Clicking Auto-Detect reports the outcome in the status line. Opening the
+ * popup runs it `quiet`, logging only: no open tabs is not an error when nobody
+ * asked, and a red banner on every open would sit on top of the comparison
+ * restored underneath it.
+ */
+async function autoPopulateActivityUrls({ quiet = false } = {}) {
+  const report = quiet ? addLogEntry : showStatus;
+
   try {
     addLogEntry('Searching for open Strava activity tabs...', 'info');
-    showStatus('Scanning open tabs for Strava activities...', 'loading');
+    if (!quiet) showStatus('Scanning open tabs for Strava activities...', 'loading');
 
     const stravaActivityTabs = await findActivityTabs();
     addLogEntry(`Found ${stravaActivityTabs.length} open Strava activity tabs`, 'info');
 
     if (!stravaActivityTabs.length) {
-      showStatus('❌ No open Strava activity tabs found - please navigate to Strava activities first', 'error');
+      if (!quiet) {
+        showStatus('❌ No open Strava activity tabs found - please navigate to Strava activities first', 'error');
+      }
       return;
     }
 
@@ -210,9 +222,9 @@ async function autoPopulateActivityUrls() {
     if (stravaActivityTabs.length >= 2) {
       activity2Input.value = stravaActivityTabs[1].url;
       addLogEntry(`Auto-populated Activity 2: ${extractActivityIdFromUrl(stravaActivityTabs[1].url)}`, 'success');
-      showStatus('✅ Auto-detected 2 Strava activities - ready to compare!', 'success');
+      report('✅ Auto-detected 2 Strava activities - ready to compare!', 'success');
     } else {
-      showStatus('⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually', 'info');
+      report('⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually', 'info');
     }
 
     if (stravaActivityTabs.length > 2) {
@@ -225,7 +237,7 @@ async function autoPopulateActivityUrls() {
     });
   } catch (error) {
     addLogEntry(`Error auto-detecting Strava tabs: ${error.message}`, 'error');
-    showStatus(`Error scanning tabs: ${error.message}`, 'error');
+    if (!quiet) showStatus(`Error scanning tabs: ${error.message}`, 'error');
   }
 }
 
@@ -307,12 +319,59 @@ async function waitForContentScript(tabId) {
   return false;
 }
 
+// Background tabs this page opens for its own use. Closing one in a `finally`
+// is not enough on its own: the popup is destroyed the moment the user clicks
+// away, and its `finally` blocks with it. So the service worker is kept told
+// which tabs are open, and closes whatever is left when this page's port
+// disconnects (see background.js).
+
+// Must match WORK_TABS_PORT in background.js.
+const WORK_TABS_PORT = 'workTabs';
+// The service worker is stopped after 30 seconds without an event, which would
+// take its list down with it. A message on the port counts as one.
+const WORK_TABS_HEARTBEAT_MS = 20000;
+
+const workTabIds = new Set();
+let workTabsPort = null;
+let workTabsHeartbeat = null;
+
+/** Send the service worker the full list of tabs this page has open. */
+function syncWorkTabs() {
+  if (!workTabsPort) {
+    workTabsPort = chrome.runtime.connect({ name: WORK_TABS_PORT });
+    // Reconnected, with the list sent again, on the next sync.
+    workTabsPort.onDisconnect.addListener(() => {
+      workTabsPort = null;
+    });
+  }
+  workTabsPort.postMessage({ tabIds: [...workTabIds] });
+
+  if (workTabIds.size && !workTabsHeartbeat) {
+    workTabsHeartbeat = setInterval(syncWorkTabs, WORK_TABS_HEARTBEAT_MS);
+  } else if (!workTabIds.size && workTabsHeartbeat) {
+    clearInterval(workTabsHeartbeat);
+    workTabsHeartbeat = null;
+  }
+}
+
+async function openWorkTab(url) {
+  const tab = await chrome.tabs.create({ url, active: false });
+  workTabIds.add(tab.id);
+  syncWorkTabs();
+  return tab;
+}
+
+async function closeWorkTab(tabId) {
+  // Closed before it leaves the list, so there is no moment where the tab is
+  // open and nobody would close it.
+  await chrome.tabs.remove(tabId).catch(() => {});
+  workTabIds.delete(tabId);
+  syncWorkTabs();
+}
+
 /** Last resort: open the activity in a background tab and read it there. */
 async function extractViaNewTab(activityId) {
-  const tab = await chrome.tabs.create({
-    url: `https://www.strava.com/activities/${activityId}`,
-    active: false
-  });
+  const tab = await openWorkTab(`https://www.strava.com/activities/${activityId}`);
   addLogEntry(`Opened background tab ${tab.id} for activity ${activityId}`, 'info');
 
   try {
@@ -323,7 +382,7 @@ async function extractViaNewTab(activityId) {
     return await extractFromTab(tab.id);
   } finally {
     // Always clean up, including on failure.
-    await chrome.tabs.remove(tab.id).catch(() => {});
+    await closeWorkTab(tab.id);
     addLogEntry(`Closed background tab ${tab.id}`, 'info');
   }
 }
@@ -388,7 +447,7 @@ async function withProxyTab(fn) {
     return fn(existingId);
   }
 
-  const tab = await chrome.tabs.create({ url: 'https://www.strava.com/dashboard', active: false });
+  const tab = await openWorkTab('https://www.strava.com/dashboard');
   addLogEntry(`Opened background tab ${tab.id} to reach Strava`, 'info');
 
   try {
@@ -397,7 +456,7 @@ async function withProxyTab(fn) {
     }
     return await fn(tab.id);
   } finally {
-    await chrome.tabs.remove(tab.id).catch(() => {});
+    await closeWorkTab(tab.id);
     addLogEntry(`Closed background tab ${tab.id}`, 'info');
   }
 }
@@ -406,7 +465,42 @@ async function withProxyTab(fn) {
  * Comparison
  * ------------------------------------------------------------------ */
 
-async function compareActivities() {
+// Whether a comparison, a PR lookup or a "My Activities" search is running.
+let running = false;
+
+/**
+ * Run `task` unless another run is already in progress.
+ *
+ * All three write the status line, and the first two replace `comparison`, so
+ * two at once would interleave their messages and could save a mix of both.
+ * The buttons that start one are disabled meanwhile, and a click that gets
+ * through anyway — a suggested activity picked mid-run, say — is ignored.
+ */
+async function runExclusive(task) {
+  if (running) return;
+  running = true;
+  setRunControlsDisabled(true);
+  try {
+    await task();
+  } finally {
+    running = false;
+    setRunControlsDisabled(false);
+  }
+}
+
+function setRunControlsDisabled(disabled) {
+  const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
+  // Clear too: clearing under a run would only be undone when it finishes.
+  [compareBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+    button.disabled = disabled;
+  });
+}
+
+function compareActivities() {
+  return runExclusive(readAndCompare);
+}
+
+async function readAndCompare() {
   const activity1Url = activity1Input.value.trim();
   const activity2Url = activity2Input.value.trim();
 
@@ -423,7 +517,6 @@ async function compareActivities() {
     return;
   }
 
-  compareBtn.disabled = true;
   await chrome.storage.local.set({ activity1: activity1Url, activity2: activity2Url });
   showStatus('Fetching segment data from both activities...', 'loading');
 
@@ -468,8 +561,6 @@ async function compareActivities() {
     await saveComparison();
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    compareBtn.disabled = false;
   }
 }
 
@@ -544,6 +635,10 @@ const HISTORY_CACHE_KEY = 'segmentHistoryCache';
 // Where 2.6 kept PRs alone; cleared on the next write.
 const LEGACY_PR_CACHE_KEY = 'prCache';
 const HISTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// A segment whose history could not be read is tried again much sooner. The
+// usual reasons — a rate limit, a network blip, a moment signed out — pass in
+// minutes, and holding on to one for a day would show N/A for a day.
+const HISTORY_RETRY_AFTER_MS = 10 * 60 * 1000;
 const HISTORY_FETCH_CONCURRENCY = 3;
 const HISTORY_MAX_SEGMENTS = 60;
 // How often the cache is written back while a run is in progress. Also the
@@ -554,16 +649,16 @@ const HISTORY_FLUSH_EVERY = 5;
 // rather than a burst at Strava.
 const HISTORY_FETCH_SPACING_MS = 250;
 
-/** Read the history cache, dropping entries older than the TTL. */
+/** Read the history cache, dropping entries older than their TTL. */
 async function readHistoryCache() {
   const data = await chrome.storage.local.get(HISTORY_CACHE_KEY);
   const cached = data[HISTORY_CACHE_KEY] || {};
   const fresh = {};
 
   Object.entries(cached).forEach(([segmentId, entry]) => {
-    if (entry && Date.now() - (entry.fetchedAt || 0) < HISTORY_CACHE_TTL_MS) {
-      fresh[segmentId] = entry;
-    }
+    if (!entry) return;
+    const ttl = entry.incomplete ? HISTORY_RETRY_AFTER_MS : HISTORY_CACHE_TTL_MS;
+    if (Date.now() - (entry.fetchedAt || 0) < ttl) fresh[segmentId] = entry;
   });
 
   return fresh;
@@ -611,12 +706,23 @@ async function fetchSegmentHistories(segmentIds) {
             recent: response.recent || null,
             times: response.times || null,
             effortCount: response.effortCount || null,
+            // The PR came from the segment page, without the history behind
+            // it, so the history is worth asking for again soon.
+            incomplete: Boolean(response.historyError),
             fetchedAt: Date.now()
           };
         } catch (error) {
-          // Cache the miss too, so one bad segment is not retried on every click.
+          // Cache the miss too, so one bad segment is not retried on every
+          // click, but only briefly: the cause is usually gone in minutes.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = { pr: null, recent: null, times: null, effortCount: null, fetchedAt: Date.now() };
+          cache[segmentId] = {
+            pr: null,
+            recent: null,
+            times: null,
+            effortCount: null,
+            incomplete: true,
+            fetchedAt: Date.now()
+          };
         }
 
         done += 1;
@@ -657,7 +763,11 @@ async function fetchSegmentHistories(segmentIds) {
  * Note this is *your* PR as the signed-in athlete, which is only meaningful
  * when one of the two activities is yours.
  */
-async function loadPersonalRecords() {
+function loadPersonalRecords() {
+  return runExclusive(addPersonalRecords);
+}
+
+async function addPersonalRecords() {
   if (!comparison.matched.length) {
     showStatus('Compare two activities first', 'error');
     return;
@@ -670,8 +780,6 @@ async function loadPersonalRecords() {
     showStatus('No Strava segment ids in this comparison — click "Compare Activities" again, then retry', 'error');
     return;
   }
-
-  prBtn.disabled = true;
 
   try {
     const cache = await fetchSegmentHistories(wanted);
@@ -702,8 +810,6 @@ async function loadPersonalRecords() {
     }
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    prBtn.disabled = false;
   }
 }
 
@@ -717,7 +823,11 @@ const MY_ACTIVITIES_SHOWN = 5;
  * Suggest your other activities on activity 1's segments, most shared first,
  * so activity 2 can be picked instead of hunted for.
  */
-async function findMyActivities() {
+function findMyActivities() {
+  return runExclusive(suggestMyActivities);
+}
+
+async function suggestMyActivities() {
   const activity1Url = activity1Input.value.trim();
   if (!isValidStravaActivityUrl(activity1Url)) {
     showStatus('Enter or auto-detect Activity 1 first', 'error');
@@ -725,7 +835,6 @@ async function findMyActivities() {
   }
   const activity1Id = extractActivityIdFromUrl(activity1Url);
 
-  myActivitiesBtn.disabled = true;
   myActivitiesSection.classList.add('hidden');
 
   try {
@@ -757,8 +866,6 @@ async function findMyActivities() {
     }
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    myActivitiesBtn.disabled = false;
   }
 }
 
@@ -817,9 +924,21 @@ function renderMyActivities(candidates, segmentCount) {
  * Rendering
  * ------------------------------------------------------------------ */
 
+/**
+ * What to call activity 1 or 2 in headers, the summary and the stats panels.
+ *
+ * The athlete's name, unless both activities are the same athlete's — the most
+ * common comparison of all, two of your own rides — where the name would label
+ * both columns alike. The activity number then says which is which, and matches
+ * the URL fields it came from.
+ */
 function getDisplayName(index) {
-  const name = index === 1 ? athlete1Name : athlete2Name;
-  return name && name.trim() ? name.trim() : `Activity ${index}`;
+  const clean = value => (value || '').replace(/\s+/g, ' ').trim();
+  const name = clean(index === 1 ? athlete1Name : athlete2Name);
+  const other = clean(index === 1 ? athlete2Name : athlete1Name);
+
+  if (!name || name.toLowerCase() === other.toLowerCase()) return `Activity ${index}`;
+  return name;
 }
 
 /** Only ever link to strava.com; segment names come from a page we don't own. */
@@ -1604,7 +1723,7 @@ function renderUnmatched(data) {
   addGroup(data.onlyIn1, getDisplayName(1));
   addGroup(data.onlyIn2, getDisplayName(2));
 
-  document.getElementById('segmentsTable').parentElement.insertAdjacentElement('afterend', section);
+  document.getElementById('unmatchedSlot').replaceChildren(section);
 }
 
 /** Side-by-side activity stats, aligned on a shared, ordered label set. */
@@ -1701,8 +1820,7 @@ function displayStatsComparison(stats1, stats2) {
   wrapper.appendChild(buildColumn(getDisplayName(2), map2));
   section.appendChild(wrapper);
 
-  const segmentsTable = document.getElementById('segmentsTable');
-  segmentsTable.parentElement.insertAdjacentElement('afterend', section);
+  document.getElementById('activityStatsSlot').replaceChildren(section);
 }
 
 /* ------------------------------------------------------------------ *

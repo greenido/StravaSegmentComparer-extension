@@ -2,7 +2,7 @@
 //
 // Loads the real popup.html and popup.js into jsdom with a stubbed chrome API,
 // so the wiring and the rendering path are exercised, not just the pure helpers.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -27,7 +27,8 @@ function stubChrome(overrides = {}) {
       }
     },
     runtime: {
-      getManifest: () => JSON.parse(read('manifest.json'))
+      getManifest: () => JSON.parse(read('manifest.json')),
+      connect: () => ({ postMessage: () => {}, onDisconnect: { addListener: () => {} } })
     },
     tabs: {
       query: async () => [],
@@ -39,12 +40,12 @@ function stubChrome(overrides = {}) {
   };
 }
 
-async function loadPopup() {
+async function loadPopup(chromeOverrides) {
   const html = read('popup.html');
   const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/)[1].replace(/<script[\s\S]*?<\/script>/g, '');
 
   document.body.innerHTML = body;
-  globalThis.chrome = stubChrome();
+  globalThis.chrome = stubChrome(chromeOverrides);
 
   // Indirect eval runs these as classic scripts, matching how the popup loads
   // them, so their function declarations land on the global object.
@@ -947,6 +948,367 @@ describe('comparing two activities that are already open', () => {
   });
 });
 
+describe('opening the popup', () => {
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+  const log = () => document.getElementById('logContent').textContent;
+  const withTabs = tabs => ({ tabs: { ...stubChrome().tabs, query: async () => tabs } });
+
+  it('does not report an error just because no activity tab is open', async () => {
+    // Nobody asked, and the restored comparison sits right under the banner.
+    await loadPopup();
+    await settle();
+
+    expect(status().classList.contains('hidden')).toBe(true);
+    expect(log()).toContain('Found 0 open Strava activity tabs');
+  });
+
+  it('still fills the fields from the open tabs, without a banner', async () => {
+    await loadPopup(
+      withTabs([
+        { id: 10, url: 'https://www.strava.com/activities/1' },
+        { id: 20, url: 'https://www.strava.com/activities/2' }
+      ])
+    );
+    await settle();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/1');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/2');
+    expect(status().classList.contains('hidden')).toBe(true);
+  });
+
+  it('reports it when Auto-Detect is clicked and finds nothing', async () => {
+    await loadPopup();
+    await settle();
+
+    document.getElementById('autoDetectBtn').click();
+    await settle();
+
+    expect(status().classList.contains('status-error')).toBe(true);
+    expect(status().textContent).toContain('No open Strava activity tabs found');
+  });
+
+  it('reports what it found when Auto-Detect is clicked', async () => {
+    await loadPopup(withTabs([{ id: 10, url: 'https://www.strava.com/activities/1' }]));
+    await settle();
+
+    document.getElementById('autoDetectBtn').click();
+    await settle();
+
+    expect(status().textContent).toContain('Found 1 Strava activity');
+  });
+});
+
+describe('one run at a time', () => {
+  let sent;
+  let gate;
+  let release;
+
+  // Holds every activity read from here on until released, so a run can be
+  // caught mid-way.
+  const hold = () => {
+    gate = new Promise(resolve => (release = resolve));
+  };
+
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const actions = action => sent.filter(request => request.action === action).length;
+  const runControls = () =>
+    ['compareBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
+
+  beforeEach(async () => {
+    await loadPopup();
+    sent = [];
+    gate = Promise.resolve();
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      sent.push(request);
+      if (request.action === 'ping') return { ok: true };
+      if (request.action === 'fetchSegmentHistory') return { ok: true, pr: { time: '4:00' } };
+      await gate;
+      return {
+        ok: true,
+        data: {
+          activityId: String(tabId),
+          athleteName: tabId === 10 ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+        }
+      };
+    };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+  });
+
+  it('ignores a second comparison started while one is running', async () => {
+    hold();
+    const first = compareActivities();
+    await settle();
+
+    await compareActivities();
+    release();
+    await first;
+
+    expect(actions('extractSegmentData')).toBe(2);
+    expect(document.getElementById('status').textContent).toBe('Successfully compared 1 segments');
+  });
+
+  it('ignores a PR lookup started during a comparison', async () => {
+    // Earlier, the lookup would have applied PRs to whichever comparison was
+    // current when it finished, and saved the mix.
+    await compareActivities();
+
+    hold();
+    const second = compareActivities();
+    await settle();
+    await loadPersonalRecords();
+    release();
+    await second;
+
+    expect(actions('fetchSegmentHistory')).toBe(0);
+  });
+
+  it('disables the buttons that start a run, and the suggestions, until it finishes', async () => {
+    renderMyActivities([{ activityId: '7', name: 'Hill repeats', date: null, shared: 1 }], 1);
+    const suggestion = document.querySelector('#myActivitiesSection .activity-option');
+
+    hold();
+    const first = compareActivities();
+    await settle();
+    expect(runControls().every(button => button.disabled)).toBe(true);
+    expect(suggestion.disabled).toBe(true);
+
+    release();
+    await first;
+    expect(runControls().every(button => !button.disabled)).toBe(true);
+    expect(suggestion.disabled).toBe(false);
+  });
+
+  it('frees the buttons again when a run fails', async () => {
+    chrome.tabs.sendMessage = async () => {
+      throw new Error('boom');
+    };
+    chrome.tabs.create = async () => {
+      throw new Error('no tabs either');
+    };
+
+    await compareActivities();
+
+    expect(document.getElementById('status').textContent).toContain('Error');
+    expect(runControls().every(button => !button.disabled)).toBe(true);
+  });
+});
+
+describe('the sections under the table', () => {
+  beforeEach(async () => {
+    await loadPopup();
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    const segment = (segmentId, name, time) => ({ segmentId, occurrence: 0, name, time, rate: '18.0 km/h' });
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [{ label: 'Distance', value: '10.0 km' }],
+        segments:
+          tabId === 10
+            ? [segment('100', 'Climb', '5:00'), segment('101', 'Descent', '2:00'), segment('102', 'Sprint', '0:30')]
+            : [segment('100', 'Climb', '5:10'), segment('101', 'Descent', '1:55')]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  });
+
+  const order = () =>
+    [...document.querySelectorAll('#unmatchedSection, #activityStatsSection')].map(section => section.id);
+
+  it('lists the unmatched segments first, then the activity stats', () => {
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+
+  it('keeps that order after sorting', () => {
+    document.querySelector('#segmentsTable thead th.sortable').click();
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+
+  it('keeps that order after filtering', () => {
+    const search = document.getElementById('tableSearch');
+    search.value = 'climb';
+    search.dispatchEvent(new Event('input'));
+
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+});
+
+describe('comparing two activities by the same athlete', () => {
+  const ride = (activityId, athleteName, time) => ({
+    activityId,
+    athleteName,
+    activityStats: [{ label: 'Distance', value: '10.0 km' }],
+    segments: [
+      { segmentId: '100', occurrence: 0, name: 'Climb', time, rate: '18.0 km/h' },
+      { segmentId: '101', occurrence: 0, name: 'Descent', time: '2:00', rate: '40.0 km/h' }
+    ]
+  });
+
+  const compare = async (name1, name2) => {
+    await loadPopup();
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) =>
+      request.action === 'ping'
+        ? { ok: true }
+        : { ok: true, data: tabId === 10 ? ride('1', name1, '5:00') : ride('2', name2, '5:10') };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  };
+
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+
+  it('tells the two columns apart by activity number, not the shared name', async () => {
+    // Two of your own rides is the most common comparison of all.
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    expect(headers()).toContain('Time (Activity 1)');
+    expect(headers()).toContain('Time (Activity 2)');
+    expect(headers().join()).not.toContain('Ada Lovelace');
+  });
+
+  it('says which activity was slower in the summary', async () => {
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    expect(document.querySelector('.summary-caption').textContent).toBe(
+      'Activity 2 slower than Activity 1 across 2 matched segments'
+    );
+  });
+
+  it('heads the stats panels and the CSV the same way', async () => {
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    const panels = [...document.querySelectorAll('#activityStatsSection h3')].map(h => h.textContent);
+    expect(panels).toEqual(['Activity 1', 'Activity 2']);
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')[0]).toContain('"Time (Activity 1)","Time (Activity 2)"');
+  });
+
+  it('treats names that differ only in case or spacing as the same athlete', async () => {
+    await compare('Ada Lovelace', ' ada  lovelace ');
+
+    expect(headers()).toContain('Time (Activity 1)');
+    expect(headers()).toContain('Time (Activity 2)');
+  });
+
+  it('keeps the names when the athletes differ', async () => {
+    await compare('Ada Lovelace', 'Grace Hopper');
+
+    expect(headers()).toContain('Time (Ada Lovelace)');
+    expect(headers()).toContain('Time (Grace Hopper)');
+  });
+});
+
+describe('comparing two activities when no Strava tab is open', () => {
+  let opened;
+  let removed;
+  let reported;
+  let intervals;
+
+  beforeEach(async () => {
+    await loadPopup();
+    opened = {};
+    removed = [];
+    reported = [];
+    intervals = { started: [], cleared: [] };
+
+    let nextTabId = 40;
+    chrome.runtime.connect = ({ name }) => ({
+      postMessage: message => reported.push({ name, tabIds: message.tabIds }),
+      onDisconnect: { addListener: () => {} }
+    });
+    chrome.tabs.query = async () => [];
+    chrome.tabs.create = async ({ url, active }) => {
+      const id = nextTabId++;
+      opened[id] = { url, active };
+      return { id };
+    };
+    chrome.tabs.remove = async tabId => {
+      removed.push(tabId);
+    };
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      if (request.action === 'ping') return { ok: true };
+      const activityId = opened[tabId].url.split('/').pop();
+      return {
+        ok: true,
+        data: {
+          activityId,
+          athleteName: activityId === '1' ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: activityId === '1' ? '5:00' : '5:10' }]
+        }
+      };
+    };
+
+    const { setInterval: realSet, clearInterval: realClear } = globalThis;
+    globalThis.setInterval = (fn, ms) => {
+      const handle = realSet(fn, ms);
+      intervals.started.push({ handle, ms });
+      return handle;
+    };
+    globalThis.clearInterval = handle => {
+      intervals.cleared.push(handle);
+      realClear(handle);
+    };
+
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    try {
+      await compareActivities();
+    } finally {
+      globalThis.setInterval = realSet;
+      globalThis.clearInterval = realClear;
+    }
+  });
+
+  it('reads each activity in a background tab, then closes it', () => {
+    expect(Object.values(opened).map(tab => tab.url).sort()).toEqual([
+      'https://www.strava.com/activities/1',
+      'https://www.strava.com/activities/2'
+    ]);
+    expect(Object.values(opened).every(tab => tab.active === false)).toBe(true);
+    expect(removed.sort()).toEqual([40, 41]);
+    expect(document.getElementById('status').textContent).toBe('Successfully compared 1 segments');
+  });
+
+  it('keeps the service worker told which tabs are open, so they close even if the popup does first', () => {
+    expect(reported.every(message => message.name === 'workTabs')).toBe(true);
+    // Both were reported while open, and the list was empty again at the end.
+    expect(reported.some(message => message.tabIds.includes(40))).toBe(true);
+    expect(reported.some(message => message.tabIds.includes(41))).toBe(true);
+    expect(reported.at(-1).tabIds).toEqual([]);
+  });
+
+  it('keeps the service worker awake only while a tab is open', () => {
+    expect(intervals.started).toHaveLength(1);
+    expect(intervals.started[0].ms).toBeLessThan(30000);
+    expect(intervals.cleared).toEqual([intervals.started[0].handle]);
+  });
+});
+
 describe('comparing against your personal records', () => {
   let sent;
 
@@ -1066,7 +1428,7 @@ describe('comparing against your personal records', () => {
     expect(sizes.at(-1)).toBe(6);
   });
 
-  it('keeps going when one segment fails, and does not retry it', async () => {
+  it('keeps going when one segment fails, and does not retry it straight away', async () => {
     await setup({ 100: '4:30', 101: '4:10' }, { failOn: '101' });
     await loadPersonalRecords();
 
@@ -1076,6 +1438,57 @@ describe('comparing against your personal records', () => {
 
     await loadPersonalRecords();
     expect(sent.filter(r => r.action === 'fetchSegmentHistory').length).toBe(2);
+  });
+
+  describe('as time passes', () => {
+    const realNow = Date.now;
+    let now;
+
+    beforeEach(() => {
+      now = realNow();
+      Date.now = () => now;
+    });
+    afterEach(() => {
+      Date.now = realNow;
+    });
+
+    const historyRequests = () => sent.filter(r => r.action === 'fetchSegmentHistory').map(r => r.segmentId);
+
+    it('retries a failed segment after ten minutes, not a day', async () => {
+      // A rate limit or a network blip is gone in minutes; N/A for a day is not.
+      await setup({ 100: '4:30', 101: '4:10' }, { failOn: '101' });
+      await loadPersonalRecords();
+
+      now += 11 * 60 * 1000;
+      await loadPersonalRecords();
+
+      // Only the failed one is asked for again.
+      expect(historyRequests()).toEqual(['100', '101', '101']);
+    });
+
+    it('retries soon when only the segment page could be read', async () => {
+      // The PR is there, but the history behind it (and "My Activities") is not.
+      await setup({ 100: '4:30', 101: '4:10' }, { historyError: 'Strava returned HTTP 429' });
+      await loadPersonalRecords();
+
+      now += 11 * 60 * 1000;
+      await loadPersonalRecords();
+
+      expect(historyRequests()).toHaveLength(4);
+    });
+
+    it('keeps a segment that was read properly for a day', async () => {
+      await setup({ 100: '4:30', 101: '4:10' });
+      await loadPersonalRecords();
+
+      now += 23 * 60 * 60 * 1000;
+      await loadPersonalRecords();
+      expect(historyRequests()).toHaveLength(2);
+
+      now += 2 * 60 * 60 * 1000;
+      await loadPersonalRecords();
+      expect(historyRequests()).toHaveLength(4);
+    });
   });
 
   it('asks for a fresh comparison, rather than fetching, when no segment has an id', async () => {

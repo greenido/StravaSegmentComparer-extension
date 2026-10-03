@@ -8,9 +8,9 @@ If you have questions or issues, please open an issue on GitHub.
 
 ## Features
 
-- **Auto-detect open Strava activity tabs**: Scans your open tabs and auto-fills the first two activity URLs
+- **Auto-detect open Strava activity tabs**: Scans your open tabs and auto-fills the first two activity URLs. Opening the popup does this quietly; the Auto-Detect button also says what it found
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
-- **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort
+- **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort, and is closed again even if you close the popup first
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
 - **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
 - **Sortable columns**: Click a header to sort; click again to reverse
@@ -28,7 +28,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **Overlapping segments**: Segments that sit inside another are marked, and the summary can leave them out so no stretch of road is counted twice
 - **My Activities Here**: Lists your other activities on activity 1's segments, most shared first; click one to compare against it
 - **Unmatched segments**: Segments that only one activity has are listed rather than dropped
-- **Athlete-aware headers**: Uses detected athlete names for table headers when available
+- **Athlete-aware headers**: Uses detected athlete names for table headers when available. When both activities are the same athlete's, they are labelled Activity 1 and Activity 2 instead
 - **Activity stats panels**: Shows a side-by-side comparison of key activity stats, read from the page where possible and from Strava's embedded activity data when the page yields nothing
 - **CSV export**: One-click export of the comparison table
 - **Persistent results**: The last comparison is auto-restored on popup open
@@ -44,7 +44,7 @@ time and speed/pace deltas shown as both a colour and an arrow.
 3. Click “Load unpacked” and select this project folder
 4. Pin the extension (optional) and open it from the toolbar
 
-Required permissions: `tabs`, `storage`, and host access to `https://www.strava.com/*` (see `manifest.json`).
+Required permissions: `storage`, and host access to `https://www.strava.com/*` (see `manifest.json`). There is no `tabs` permission: host access already shows the extension the URLs of your Strava tabs, and no others.
 
 ## Usage
 
@@ -147,6 +147,9 @@ Some caveats worth knowing:
   24 hours, shared with “My Activities Here”. `Clear` does not empty that cache
 - Segments where the PR cannot be read show `N/A`. That means "unknown", not
   "no PR" — this reads what Strava serves rather than guessing
+- A segment that could not be read — a rate limit, a network blip, or only its
+  segment page answering — is cached for 10 minutes rather than 24 hours, so
+  clicking again after that retries it
 
 ### Export
 
@@ -182,7 +185,7 @@ back automatically when a route fails:
 
 1. **The activity is already open in a tab** — the content script reads it directly. No new tabs, no fetching.
 2. **Some other strava.com tab is open** — that tab fetches the activity HTML from its own origin (so your session cookie is sent), and the popup parses it with `DOMParser`.
-3. **Nothing relevant is open** — the popup opens a background tab, waits for the content script to answer, reads the data, and closes the tab again.
+3. **Nothing relevant is open** — the popup opens a background tab, waits for the content script to answer, reads the data, and closes the tab again. If you close the popup before it finishes, the service worker closes the tab instead.
 
 A strava.com tab is only used for route 2 if its content script answers. Tabs
 opened before the extension was installed or updated are skipped until you
@@ -200,7 +203,7 @@ Files:
 - `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or look up your effort history on a segment (your PR and recent activities there; the segment page is the fallback for the PR). It only fetches from an allowlist of paths, and waits for the segments table with a `MutationObserver` instead of a fixed sleep
 - `popup.js`: tab detection, route selection, comparison, rendering, CSV export. The table's columns are declared once in `COLUMNS`, which drives the headers, the cells and the CSV together
 - `utils.js`: pure parsing and comparison helpers (times, speeds, paces, power, heart rate, VAM, distances, segment matching, sorting, summary, ranking your activities)
-- `background.js`: minimal MV3 service worker
+- `background.js`: MV3 service worker. Its one job is closing the background tabs a popup opened, if the popup is closed before it could
 
 ## Development
 
@@ -213,7 +216,8 @@ npm test
 
 `utils.js` and `extractor.js` are covered by unit tests; `tests/popup.test.js`
 loads the real `popup.html` and `popup.js` into jsdom with a stubbed `chrome`
-API and exercises the full comparison and rendering path.
+API and exercises the full comparison and rendering path. `tests/background.test.js`
+plays the popup's side of the service worker's port, including closing mid-run.
 
 GitHub Actions runs `npm test` and `npm run build` on every push to `main` and
 every pull request, and keeps the packaged zip as a build artifact.
@@ -255,6 +259,7 @@ Project structure (selected):
 - Power or heart-rate columns missing: Neither activity recorded it, or Strava served data this version does not recognise. Runs usually have no power
 - VAM columns missing: None of the matched segments averages 3% or steeper
 - “My Activities Here” lists nothing: None of your 20 most recent activities on each segment is another activity than activity 1, or your effort history could not be read — the log says which
+- Buttons are dimmed and do nothing: a comparison, PR lookup or “My Activities Here” search is still running. Only one runs at a time, and the buttons come back when it finishes
 - If the popup shows stale data, click “Clear” to reset and re-run the comparison
 - The activity log in the popup names the route used for each activity, which is the fastest way to see where a comparison went wrong
 
