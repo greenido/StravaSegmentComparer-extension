@@ -12,7 +12,10 @@ If you have questions or issues, please open an issue on GitHub.
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
 - **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort, and is closed again even if you close the popup first
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
+- **Time Diff %**: Each time difference as a share of activity 1's time, so a short segment counts as much as a long one
+- **Copy summary**: The summary as plain text on your clipboard, ready for a chat or club thread
 - **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
+- **Swap activities**: One click swaps activity 1 and 2. A comparison on screen is redone the other way round
 - **Sortable columns**: Click a header to sort; click again to reverse
 - **Filter by name**: Narrow a long ride to the segments you care about; the export follows what is shown
 - **Open in tab**: Take the comparison out of the popup into a full-width tab, no refetching
@@ -21,7 +24,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **VAM**: Metres climbed per hour on segments averaging 3% or steeper, and the delta
 - **Medals**: Strava's own PR / 2nd / 3rd (and KOM) marker next to each effort's time
 - **Segment context**: Distance and average grade under each segment name
-- **Personal records**: One click adds your PR for each segment and how far off it you were
+- **Personal records**: One click adds your PR for each segment and how far off it you were. “Refresh my PRs” reads them again, skipping the day-long cache
 - **Your history**: Where this effort ranks among all your efforts on the segment, with a sparkline of your times and your best marked — from the same lookup as the PRs, so it costs no extra requests
 - **Form**: Reads each time change against the heart-rate change behind it — Fitness, Effort, Even, Easier, Slower or Fading
 - **Where the gap opened up**: A bar per segment in course order showing the running total, so you can see whether the time went in one place or everywhere
@@ -60,6 +63,14 @@ Required permissions: `storage`, and host access to `https://www.strava.com/*` (
 1. Copy/paste two activity URLs into the input fields
 2. Click “Compare Activities”
 
+### Swapping activities
+
+Every delta is activity 2 minus activity 1, and the PR and history columns read
+activity 1's times, so which is which matters. The ⇄ button between the URL
+fields swaps them. If a comparison is showing, it is redone the other way round
+so the table matches the fields. That re-reads both activities, and any PR
+columns need “Compare vs my PRs” again, which comes from the cache.
+
 ### My Activities Here
 
 Fill in (or auto-detect) Activity 1 only, then click “My Activities Here”. It
@@ -80,6 +91,15 @@ the biggest three losses and gains by name. The net is a plain sum of the
 per-segment deltas — the sense in which people say “I lost three minutes” — so
 a long segment contributes more to it than a short one. It is not weighted by
 segment length.
+
+The **Time Diff %** column is the length-fair reading: each segment's time
+difference as a share of activity 1's time there. Ten seconds is 20% on a
+50-second sprint and under 1% on a twenty-minute climb, so sorting by it puts
+the segments where activity 2 was *relatively* slowest on top.
+
+“Copy summary” puts the same reading on your clipboard as plain text: who was
+faster and by how much, the faster/slower counts, and the biggest losses and
+gains. It follows the nested-segments choice, so it says what the panel says.
 
 Under the counts, a bar per segment in course order shows the running total:
 above the dashed line activity 2 is behind, below it is ahead. Hovering a bar
@@ -144,7 +164,10 @@ Some caveats worth knowing:
   page is read instead, and the activity log says so and why
 - Strava has no bulk PR endpoint, so this is one request per segment. It is
   capped at 60 segments per click, runs three at a time, and caches results for
-  24 hours, shared with “My Activities Here”. `Clear` does not empty that cache
+  24 hours, shared with “My Activities Here”. `Clear` does not empty that cache;
+  “Refresh my PRs” reads every segment again, ignoring it, which is how a PR set
+  since the last lookup shows up. A segment that fails to refresh keeps the copy
+  it had
 - Segments where the PR cannot be read show `N/A`. That means "unknown", not
   "no PR" — this reads what Strava serves rather than guessing
 - A segment that could not be read — a rate limit, a network blip, or only its
@@ -159,7 +182,7 @@ sort order you left it in.
 
 ### Status coloring
 
-- Time deltas: positive = slower (red), negative = faster (green)
+- Time deltas and Time Diff %: positive = slower (red), negative = faster (green)
 - Speed deltas: positive = faster (green), negative = slower (red)
 - Pace deltas: positive = slower (red), negative = faster (green)
 - Power and VAM deltas: positive = more (green), negative = less (red)
@@ -167,7 +190,8 @@ sort order you left it in.
   time held up, so a colour would mislead as often as it helped
 
 Shading intensity scales with the size of the delta: a full-strength tint is 60s
-of time, 5 km/h of speed, 30 s/km of pace, 50 W of power, or 200 m/h of VAM.
+of time, 10% of time, 5 km/h of speed, 30 s/km of pace, 50 W of power, or 200 m/h
+of VAM.
 
 ### VAM
 
@@ -260,6 +284,8 @@ Project structure (selected):
 - VAM columns missing: None of the matched segments averages 3% or steeper
 - “My Activities Here” lists nothing: None of your 20 most recent activities on each segment is another activity than activity 1, or your effort history could not be read — the log says which
 - Buttons are dimmed and do nothing: a comparison, PR lookup or “My Activities Here” search is still running. Only one runs at a time, and the buttons come back when it finishes
+- “Could not copy the summary”: the browser refused clipboard access, usually because the popup lost focus. Click into the popup and try again
+- Your PR or history looks out of date: it is cached for a day. Click “Refresh my PRs”
 - If the popup shows stale data, click “Clear” to reset and re-run the comparison
 - The activity log in the popup names the route used for each activity, which is the fastest way to see where a comparison went wrong
 

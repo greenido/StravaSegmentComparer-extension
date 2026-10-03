@@ -20,11 +20,14 @@ const STORAGE_KEYS = [
 // DOM Elements
 const activity1Input = document.getElementById('activity1');
 const activity2Input = document.getElementById('activity2');
+const swapBtn = document.getElementById('swapBtn');
 const compareBtn = document.getElementById('compareBtn');
 const statusDiv = document.getElementById('status');
 const resultsDiv = document.getElementById('results');
 const exportBtn = document.getElementById('exportBtn');
+const copyBtn = document.getElementById('copyBtn');
 const prBtn = document.getElementById('prBtn');
+const refreshPrBtn = document.getElementById('refreshPrBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
@@ -69,8 +72,11 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTabView();
 
   compareBtn.addEventListener('click', compareActivities);
+  swapBtn.addEventListener('click', swapActivities);
   exportBtn.addEventListener('click', exportAsCSV);
+  copyBtn.addEventListener('click', copySummary);
   prBtn.addEventListener('click', loadPersonalRecords);
+  refreshPrBtn.addEventListener('click', refreshPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
 
@@ -491,7 +497,7 @@ async function runExclusive(task) {
 function setRunControlsDisabled(disabled) {
   const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
   // Clear too: clearing under a run would only be undone when it finishes.
-  [compareBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
     button.disabled = disabled;
   });
 }
@@ -562,6 +568,26 @@ async function readAndCompare() {
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
   }
+}
+
+/**
+ * Swap activity 1 and activity 2.
+ *
+ * Which is which matters: every delta is activity 2 minus activity 1, and the
+ * PR and history columns read activity 1's times. A comparison on screen is
+ * redone the other way round rather than left describing fields that no longer
+ * match it; a re-read of open tabs is cheap, and the PR lookup is cached.
+ */
+async function swapActivities() {
+  if (running) return;
+
+  [activity1Input.value, activity2Input.value] = [activity2Input.value, activity1Input.value];
+  await chrome.storage.local.set({ activity1: activity1Input.value, activity2: activity2Input.value });
+  addLogEntry('Swapped activity 1 and activity 2', 'info');
+
+  const showing = !resultsDiv.classList.contains('hidden') && comparison.matched.length > 0;
+  const bothValid = [activity1Input, activity2Input].every(input => isValidStravaActivityUrl(input.value.trim()));
+  if (showing && bothValid) await compareActivities();
 }
 
 /**
@@ -681,11 +707,19 @@ function segmentIdsToLookUp(segments) {
 /**
  * Your history on each of `segmentIds`: `{ pr, recent }` per segment, where
  * `recent` is null if Strava's history could not be read for it.
+ *
+ * `refresh` reads every one of them again, whatever the cache holds: a PR set
+ * this morning, or an upload since the last lookup, is not in a cached copy.
  */
-async function fetchSegmentHistories(segmentIds) {
+async function fetchSegmentHistories(segmentIds, { refresh = false } = {}) {
   const cache = await readHistoryCache();
-  const missing = segmentIds.filter(segmentId => !(segmentId in cache));
-  addLogEntry(`${segmentIds.length - missing.length} segment histories cached, ${missing.length} to fetch`, 'info');
+  const missing = refresh ? segmentIds : segmentIds.filter(segmentId => !(segmentId in cache));
+  addLogEntry(
+    refresh
+      ? `Reading all ${segmentIds.length} segment histories again, skipping the cache`
+      : `${segmentIds.length - missing.length} segment histories cached, ${missing.length} to fetch`,
+    'info'
+  );
   if (!missing.length) return cache;
 
   showStatus(`Reading your history on ${missing.length} segments...`, 'loading');
@@ -714,8 +748,9 @@ async function fetchSegmentHistories(segmentIds) {
         } catch (error) {
           // Cache the miss too, so one bad segment is not retried on every
           // click, but only briefly: the cause is usually gone in minutes.
+          // On a refresh, the copy already in hand beats nothing.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = {
+          cache[segmentId] = cache[segmentId] || {
             pr: null,
             recent: null,
             times: null,
@@ -767,7 +802,12 @@ function loadPersonalRecords() {
   return runExclusive(addPersonalRecords);
 }
 
-async function addPersonalRecords() {
+/** The same, reading every segment from Strava again rather than the cache. */
+function refreshPersonalRecords() {
+  return runExclusive(() => addPersonalRecords({ refresh: true }));
+}
+
+async function addPersonalRecords({ refresh = false } = {}) {
   if (!comparison.matched.length) {
     showStatus('Compare two activities first', 'error');
     return;
@@ -782,7 +822,7 @@ async function addPersonalRecords() {
   }
 
   try {
-    const cache = await fetchSegmentHistories(wanted);
+    const cache = await fetchSegmentHistories(wanted, { refresh });
 
     const prBySegmentId = {};
     const historyBySegmentId = {};
@@ -1206,6 +1246,17 @@ const COLUMNS = [
     mark: row => isImprovement(row.time_diff_seconds, false)
   },
   {
+    key: 'time_pct',
+    className: 'col-diff',
+    label: () => 'Time Diff %',
+    csvLabel: () => 'Time Difference %',
+    headerTitle: () => "The time difference as a share of activity 1's time, so a short segment counts as much as a long one",
+    text: row => formatPercentDiff(timeDiffPercent(row)),
+    // 10% slower or faster reaches full tint.
+    style: row => diffStyle(timeDiffPercent(row), false, 10),
+    mark: row => isImprovement(timeDiffPercent(row), false)
+  },
+  {
     key: 'rate_1',
     className: 'col-speed',
     label: () => `${rateLabel} (${getDisplayName(1)})`,
@@ -1346,6 +1397,7 @@ const DEFAULT_SORT_DIRECTION = {
   time_1: 'asc',
   time_2: 'asc',
   time_diff: 'desc',
+  time_pct: 'desc',
   rate_1: 'desc',
   rate_2: 'desc',
   rate_diff: 'desc',
@@ -1864,6 +1916,28 @@ function exportAsCSV() {
     URL.revokeObjectURL(url);
     addLogEntry('CSV export completed', 'success');
   }, 100);
+}
+
+/**
+ * Copy the summary to the clipboard as plain text, for a chat or club thread.
+ *
+ * It says what the panel says, including whether nested segments are left
+ * out, so the paste matches what was on screen.
+ */
+async function copySummary() {
+  const summary = summarizeComparison(comparison.matched, { excludeNested });
+  const text = summaryText(summary, getDisplayName(1), getDisplayName(2), { excludeNested });
+  if (!text) {
+    showStatus('Nothing to copy yet — compare two activities first', 'error');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus('Summary copied to the clipboard', 'success');
+  } catch (error) {
+    showStatus(`Could not copy the summary: ${error.message}`, 'error');
+  }
 }
 
 /* ------------------------------------------------------------------ *

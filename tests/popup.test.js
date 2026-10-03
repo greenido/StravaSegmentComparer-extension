@@ -425,8 +425,8 @@ describe('reading the table without colour', () => {
     });
 
     const marks = [...document.querySelectorAll('#segmentsTableBody .diff-mark')];
-    // Time, rate and power deltas: faster, faster, more watts.
-    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2']);
+    // Time, time as a percentage, rate and power: faster, faster, faster, more watts.
+    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2', '\u25b2']);
     expect(marks.every(mark => mark.title === 'Better')).toBe(true);
     expect(marks[0].getAttribute('aria-label')).toBe('better');
   });
@@ -490,7 +490,7 @@ describe('the results toolbar', () => {
   it('names each icon-only button, both aloud and in its tooltip', async () => {
     await loadPopup();
 
-    ['exportBtn', 'prBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
+    ['copyBtn', 'exportBtn', 'prBtn', 'refreshPrBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
       const button = document.getElementById(id);
       expect(button.textContent.trim()).toBe('');
       expect(button.getAttribute('aria-label')).toBeTruthy();
@@ -944,7 +944,7 @@ describe('comparing two activities that are already open', () => {
 
     const [header, first] = captured[0].split('\n');
     expect(header).toContain('"Pace (Ada)"');
-    expect(first).toBe('"Mile 1","5:00","5:05","+0:05","5:30 /km","5:30 /km","0:00 /km"');
+    expect(first).toBe('"Mile 1","5:00","5:05","+0:05","+1.7%","5:30 /km","5:30 /km","0:00 /km"');
   });
 });
 
@@ -1017,7 +1017,9 @@ describe('one run at a time', () => {
   };
   const actions = action => sent.filter(request => request.action === action).length;
   const runControls = () =>
-    ['compareBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
+    ['compareBtn', 'swapBtn', 'prBtn', 'refreshPrBtn', 'myActivitiesBtn', 'clearBtn'].map(id =>
+      document.getElementById(id)
+    );
 
   beforeEach(async () => {
     await loadPopup();
@@ -1103,6 +1105,219 @@ describe('one run at a time', () => {
 
     expect(document.getElementById('status').textContent).toContain('Error');
     expect(runControls().every(button => !button.disabled)).toBe(true);
+  });
+});
+
+describe('the time difference as a percentage', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  const column = () => {
+    const ths = [...document.querySelectorAll('#segmentsTable thead th')];
+    return ths.findIndex(th => th.textContent.startsWith('Time Diff %'));
+  };
+
+  it('sits next to the time difference and says what it means', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+
+    const ths = [...document.querySelectorAll('#segmentsTable thead th')];
+    expect(ths[column() - 1].textContent).toMatch(/^Time Diff/);
+    expect(ths[column()].title).toContain("share of activity 1's time");
+  });
+
+  it('shows the gap relative to the segment, with an arrow and a tint', () => {
+    // 18:20 is 1100 s, so 15 s faster is 1.4% faster.
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+
+    const cell = document.querySelector('#segmentsTableBody tr').children[column()];
+    expect(cell.firstChild.textContent).toBe('-1.4%');
+    expect(cell.querySelector('.diff-mark').textContent).toBe('▲');
+    expect(cell.style.backgroundColor).toContain('34, 197, 94');
+  });
+
+  it('works on a comparison saved before the column existed', () => {
+    // Nothing new is stored on the row; it is worked out from the times.
+    const saved = row();
+    expect(saved).not.toHaveProperty('time_pct');
+    renderComparison({ matched: [saved], onlyIn1: [], onlyIn2: [] });
+
+    expect(document.querySelector('#segmentsTableBody tr').children[column()].firstChild.textContent).toBe('-1.4%');
+  });
+
+  it('sorts the biggest relative loss first on the first click', async () => {
+    // Climb loses 30 s of 20 min (2.5%); Sprint loses 10 s of 50 s (20%).
+    const segments = times =>
+      ['Climb', 'Sprint'].map((name, i) => ({ segmentId: String(100 + i), occurrence: 0, name, time: times[i] }));
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: tabId === 10 ? segments(['20:00', '0:50']) : segments(['20:30', '1:00'])
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    document.querySelectorAll('#segmentsTable thead th')[column()].click();
+
+    const names = [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.firstChild.textContent);
+    expect(names).toEqual(['Sprint', 'Climb']);
+  });
+});
+
+describe('copying the summary', () => {
+  let copied;
+
+  const stubClipboard = writeText => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  };
+  const copy = async () => {
+    document.getElementById('copyBtn').click();
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+
+  beforeEach(async () => {
+    await loadPopup();
+    copied = [];
+    stubClipboard(async text => {
+      copied.push(text);
+    });
+  });
+
+  it('copies what the summary panel says, as plain text', async () => {
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: [{ segmentId: '100', occurrence: 0, name: 'Old La Honda', time: tabId === 10 ? '18:20' : '18:35' }]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    await copy();
+
+    expect(copied).toEqual([
+      [
+        'Grace was 0:15 slower than Ada across 1 matched segment',
+        'Faster on 0, slower on 1',
+        'Biggest losses: Old La Honda +0:15'
+      ].join('\n')
+    ]);
+    expect(status().textContent).toBe('Summary copied to the clipboard');
+  });
+
+  it('says so, and copies nothing, before there is a comparison', async () => {
+    await copy();
+
+    expect(copied).toEqual([]);
+    expect(status().classList.contains('status-error')).toBe(true);
+  });
+
+  it('reports a clipboard that refuses', async () => {
+    stubClipboard(async () => {
+      throw new Error('Document is not focused.');
+    });
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    await copy();
+
+    expect(status().textContent).toBe('Could not copy the summary: Document is not focused.');
+  });
+});
+
+describe('swapping activity 1 and 2', () => {
+  let extracted;
+
+  beforeEach(async () => {
+    await loadPopup();
+    extracted = 0;
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      if (request.action === 'ping') return { ok: true };
+      extracted += 1;
+      return {
+        ok: true,
+        data: {
+          activityId: String(tabId),
+          athleteName: tabId === 10 ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+        }
+      };
+    };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+  });
+
+  const swap = async () => {
+    document.getElementById('swapBtn').click();
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+
+  it('swaps the two URLs, and remembers them that way round', async () => {
+    await swap();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/2');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/1');
+    const saved = await chrome.storage.local.get(['activity1', 'activity2']);
+    expect(saved).toEqual({
+      activity1: 'https://www.strava.com/activities/2',
+      activity2: 'https://www.strava.com/activities/1'
+    });
+  });
+
+  it('does not fetch anything when there is no comparison on screen', async () => {
+    await swap();
+    expect(extracted).toBe(0);
+  });
+
+  it('redoes a comparison on screen the other way round', async () => {
+    await compareActivities();
+    expect(headers()).toContain('Time (Ada)');
+    expect(document.querySelector('.summary-net').textContent).toBe('+0:10');
+
+    await swap();
+
+    // Activity 1 is now Grace's, so the gap reads the other way.
+    expect(headers().indexOf('Time (Grace)')).toBeLessThan(headers().indexOf('Time (Ada)'));
+    expect(document.querySelector('.summary-net').textContent).toBe('-0:10');
+    expect(extracted).toBe(4);
   });
 });
 
@@ -1438,6 +1653,62 @@ describe('comparing against your personal records', () => {
 
     await loadPersonalRecords();
     expect(sent.filter(r => r.action === 'fetchSegmentHistory').length).toBe(2);
+  });
+
+  describe('refreshing', () => {
+    const historyRequests = () => sent.filter(r => r.action === 'fetchSegmentHistory').length;
+    const prCell = index => [...document.querySelectorAll('#segmentsTableBody tr')[index].children].at(-2).textContent;
+
+    it('reads every segment from Strava again, skipping the cache', async () => {
+      const prs = { 100: '4:30', 101: '4:10' };
+      await setup(prs);
+      await loadPersonalRecords();
+      expect(prCell(0)).toBe('4:30');
+
+      // A PR set since the last lookup is not in the cached copy.
+      prs[100] = '4:20';
+      await loadPersonalRecords();
+      expect(prCell(0)).toBe('4:30');
+
+      await refreshPersonalRecords();
+
+      expect(historyRequests()).toBe(4);
+      expect(prCell(0)).toBe('4:20');
+    });
+
+    it('is what the Refresh my PRs button does', async () => {
+      await setup({ 100: '4:30', 101: '4:10' });
+      await loadPersonalRecords();
+
+      document.getElementById('refreshPrBtn').click();
+      // Requests are spaced out, so this takes real time.
+      const status = () => document.getElementById('status').textContent;
+      for (let i = 0; i < 60 && !(historyRequests() === 4 && status().startsWith('Found')); i++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      expect(historyRequests()).toBe(4);
+      expect(document.getElementById('status').textContent).toBe('Found your PR for 2 of 2 segments');
+    });
+
+    it('keeps the copy it had for a segment that fails to refresh', async () => {
+      const prs = { 100: '4:30', 101: '4:10' };
+      await setup(prs);
+      await loadPersonalRecords();
+
+      // Strava refuses one segment this time round.
+      prs[100] = '4:20';
+      const send = chrome.tabs.sendMessage;
+      chrome.tabs.sendMessage = async (tabId, request) => {
+        if (request.action === 'fetchSegmentHistory' && request.segmentId === '101') throw new Error('network boom');
+        return send(tabId, request);
+      };
+      await refreshPersonalRecords();
+
+      expect(prCell(0)).toBe('4:20');
+      // N/A would be a step backwards from the PR already known.
+      expect(prCell(1)).toBe('4:10');
+    });
   });
 
   describe('as time passes', () => {

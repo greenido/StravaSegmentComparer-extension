@@ -29,7 +29,10 @@ import {
   hasQualityData,
   cumulativeTimeDeltas,
   markNestedSegments,
-  filterSegments
+  filterSegments,
+  timeDiffPercent,
+  formatPercentDiff,
+  summaryText
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -243,6 +246,58 @@ describe('formatPowerDiff', () => {
   });
 });
 
+describe('timeDiffPercent', () => {
+  it("reads the delta as a share of activity 1's time", () => {
+    expect(timeDiffPercent({ time_1: '5:00', time_diff_seconds: 15 })).toBeCloseTo(5);
+    expect(timeDiffPercent({ time_1: '1:00:00', time_diff_seconds: -36 })).toBeCloseTo(-1);
+  });
+
+  it('weighs a short segment as much as a long one', () => {
+    // Ten seconds on a 50 s sprint is a far bigger gap than on a 20 min climb.
+    const sprint = timeDiffPercent({ time_1: '0:50', time_diff_seconds: 10 });
+    const climb = timeDiffPercent({ time_1: '20:00', time_diff_seconds: 10 });
+    expect(sprint).toBeGreaterThan(climb * 20);
+  });
+
+  it('has nothing to say without both times', () => {
+    expect(timeDiffPercent({ time_1: 'N/A', time_diff_seconds: 15 })).toBeNull();
+    expect(timeDiffPercent({ time_1: '0:00', time_diff_seconds: 15 })).toBeNull();
+    expect(timeDiffPercent({ time_1: '5:00', time_diff_seconds: null })).toBeNull();
+    expect(timeDiffPercent(null)).toBeNull();
+  });
+});
+
+describe('formatPercentDiff', () => {
+  it('signs and rounds to one decimal place', () => {
+    expect(formatPercentDiff(3.24)).toBe('+3.2%');
+    expect(formatPercentDiff(-0.85)).toBe('-0.9%');
+    expect(formatPercentDiff(0.85)).toBe('+0.9%');
+    expect(formatPercentDiff(12)).toBe('+12.0%');
+  });
+
+  it('calls a rounding-to-zero change level, without a sign', () => {
+    expect(formatPercentDiff(0.04)).toBe('0.0%');
+    expect(formatPercentDiff(-0.04)).toBe('0.0%');
+  });
+
+  it('says N/A when there is no percentage', () => {
+    expect(formatPercentDiff(null)).toBe('N/A');
+    expect(formatPercentDiff(NaN)).toBe('N/A');
+  });
+});
+
+describe('sorting by time difference as a percentage', () => {
+  it('ranks by relative gap, not absolute seconds', () => {
+    const rows = [
+      { name: 'Climb', time_1: '20:00', time_diff_seconds: 30 },
+      { name: 'Sprint', time_1: '0:50', time_diff_seconds: 10 },
+      { name: 'Unread', time_1: 'N/A', time_diff_seconds: null }
+    ];
+
+    expect(sortMatched(rows, 'time_pct', 'desc').map(row => row.name)).toEqual(['Sprint', 'Climb', 'Unread']);
+  });
+});
+
 describe('compareSegmentLists power and distance', () => {
   const withPower = (power1, power2) =>
     compareSegmentLists(
@@ -275,6 +330,57 @@ describe('hasPowerData', () => {
     expect(hasPowerData([{ power_1: 'N/A', power_2: '245 W' }])).toBe(true);
     expect(hasPowerData([{ power_1: 'N/A', power_2: 'N/A' }])).toBe(false);
     expect(hasPowerData([])).toBe(false);
+  });
+});
+
+describe('summaryText', () => {
+  const diffRow = (name, seconds, extra = {}) => ({
+    name,
+    time_diff_seconds: seconds,
+    time_diff: (seconds > 0 ? '+' : seconds < 0 ? '-' : '') + `0:${String(Math.abs(seconds)).padStart(2, '0')}`,
+    ...extra
+  });
+
+  it('says who was faster, by how much, and where', () => {
+    const summary = summarizeComparison([
+      diffRow('Old La Honda', 45),
+      diffRow('Kings Mountain', 30),
+      diffRow('Page Mill', -20),
+      diffRow('Alpine', 0)
+    ]);
+
+    expect(summaryText(summary, 'Ada', 'Grace')).toBe(
+      [
+        'Grace was 0:55 slower than Ada across 4 matched segments',
+        'Faster on 1, slower on 2, level on 1',
+        'Biggest losses: Old La Honda +0:45, Kings Mountain +0:30',
+        'Biggest gains: Page Mill -0:20'
+      ].join('\n')
+    );
+  });
+
+  it('reads a net gain as faster, and a zero net as level', () => {
+    expect(summaryText(summarizeComparison([diffRow('Climb', -12)]), 'Ada', 'Grace').split('\n')[0]).toBe(
+      'Grace was 0:12 faster than Ada across 1 matched segment'
+    );
+    expect(
+      summaryText(summarizeComparison([diffRow('A', 10), diffRow('B', -10)]), 'Ada', 'Grace').split('\n')[0]
+    ).toBe('Grace was level with Ada across 2 matched segments');
+  });
+
+  it('says when segments inside others were left out, as the panel does', () => {
+    const rows = [diffRow('Lap', 30), diffRow('Climb', 10, { nestedIn: 'Lap' })];
+    const options = { excludeNested: true };
+
+    const text = summaryText(summarizeComparison(rows, options), 'Ada', 'Grace', options);
+
+    expect(text.split('\n')[0]).toBe('Grace was 0:30 slower than Ada across 1 matched segment');
+    expect(text).toContain('Leaving out 1 segment inside another');
+  });
+
+  it('is empty when nothing could be compared', () => {
+    expect(summaryText(summarizeComparison([]), 'Ada', 'Grace')).toBe('');
+    expect(summaryText(null, 'Ada', 'Grace')).toBe('');
   });
 });
 
