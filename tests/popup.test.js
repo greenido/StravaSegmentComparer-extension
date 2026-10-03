@@ -425,8 +425,8 @@ describe('reading the table without colour', () => {
     });
 
     const marks = [...document.querySelectorAll('#segmentsTableBody .diff-mark')];
-    // Time, rate and power deltas: faster, faster, more watts.
-    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2']);
+    // Time, time as a percentage, rate and power: faster, faster, faster, more watts.
+    expect(marks.map(mark => mark.textContent)).toEqual(['\u25b2', '\u25b2', '\u25b2', '\u25b2']);
     expect(marks.every(mark => mark.title === 'Better')).toBe(true);
     expect(marks[0].getAttribute('aria-label')).toBe('better');
   });
@@ -944,7 +944,7 @@ describe('comparing two activities that are already open', () => {
 
     const [header, first] = captured[0].split('\n');
     expect(header).toContain('"Pace (Ada)"');
-    expect(first).toBe('"Mile 1","5:00","5:05","+0:05","5:30 /km","5:30 /km","0:00 /km"');
+    expect(first).toBe('"Mile 1","5:00","5:05","+0:05","+1.7%","5:30 /km","5:30 /km","0:00 /km"');
   });
 });
 
@@ -1103,6 +1103,71 @@ describe('one run at a time', () => {
 
     expect(document.getElementById('status').textContent).toContain('Error');
     expect(runControls().every(button => !button.disabled)).toBe(true);
+  });
+});
+
+describe('the time difference as a percentage', () => {
+  beforeEach(async () => {
+    await loadPopup();
+  });
+
+  const column = () => {
+    const ths = [...document.querySelectorAll('#segmentsTable thead th')];
+    return ths.findIndex(th => th.textContent.startsWith('Time Diff %'));
+  };
+
+  it('sits next to the time difference and says what it means', () => {
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+
+    const ths = [...document.querySelectorAll('#segmentsTable thead th')];
+    expect(ths[column() - 1].textContent).toMatch(/^Time Diff/);
+    expect(ths[column()].title).toContain("share of activity 1's time");
+  });
+
+  it('shows the gap relative to the segment, with an arrow and a tint', () => {
+    // 18:20 is 1100 s, so 15 s faster is 1.4% faster.
+    renderComparison({ matched: [row()], onlyIn1: [], onlyIn2: [] });
+
+    const cell = document.querySelector('#segmentsTableBody tr').children[column()];
+    expect(cell.firstChild.textContent).toBe('-1.4%');
+    expect(cell.querySelector('.diff-mark').textContent).toBe('▲');
+    expect(cell.style.backgroundColor).toContain('34, 197, 94');
+  });
+
+  it('works on a comparison saved before the column existed', () => {
+    // Nothing new is stored on the row; it is worked out from the times.
+    const saved = row();
+    expect(saved).not.toHaveProperty('time_pct');
+    renderComparison({ matched: [saved], onlyIn1: [], onlyIn2: [] });
+
+    expect(document.querySelector('#segmentsTableBody tr').children[column()].firstChild.textContent).toBe('-1.4%');
+  });
+
+  it('sorts the biggest relative loss first on the first click', async () => {
+    // Climb loses 30 s of 20 min (2.5%); Sprint loses 10 s of 50 s (20%).
+    const segments = times =>
+      ['Climb', 'Sprint'].map((name, i) => ({ segmentId: String(100 + i), occurrence: 0, name, time: times[i] }));
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: tabId === 10 ? segments(['20:00', '0:50']) : segments(['20:30', '1:00'])
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    document.querySelectorAll('#segmentsTable thead th')[column()].click();
+
+    const names = [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.firstChild.textContent);
+    expect(names).toEqual(['Sprint', 'Climb']);
   });
 });
 

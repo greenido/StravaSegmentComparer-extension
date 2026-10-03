@@ -189,6 +189,34 @@ function parseDistance(distanceStr) {
   }
 }
 
+/**
+ * A row's time difference as a share of activity 1's time, in percent.
+ *
+ * The plain delta favours long segments: ten seconds is a lot on a sprint and
+ * nothing on a long climb. As a percentage a short segment counts for as much
+ * as a long one, so this says where activity 2 was *relatively* slower.
+ *
+ * Worked out from the row rather than stored on it, so comparisons saved
+ * before it existed have it too.
+ * @returns {number|null}
+ */
+function timeDiffPercent(row) {
+  const time1 = parseTimeToSeconds(row && row.time_1);
+  const diff = row && row.time_diff_seconds;
+  if (!time1 || typeof diff !== 'number' || Number.isNaN(diff)) return null;
+  return (diff / time1) * 100;
+}
+
+/** Format a signed percentage as "+3.2%" / "-0.8%", to one decimal place. */
+function formatPercentDiff(percent) {
+  if (percent === null || percent === undefined || Number.isNaN(percent)) return 'N/A';
+
+  // Rounded by size, so -0.85% and +0.85% come out as the same number.
+  const tenths = Math.round(Math.abs(percent) * 10);
+  if (tenths === 0) return '0.0%';
+  return `${percent > 0 ? '+' : '-'}${(tenths / 10).toFixed(1)}%`;
+}
+
 /** Format a signed delta as "+12 W" / "-8 bpm", rounded to whole units. */
 function formatSignedDiff(delta, unit) {
   if (delta === null || delta === undefined || Number.isNaN(delta)) return 'N/A';
@@ -616,6 +644,7 @@ const SORT_ACCESSORS = {
   time_1: row => parseTimeToSeconds(row.time_1),
   time_2: row => parseTimeToSeconds(row.time_2),
   time_diff: row => row.time_diff_seconds,
+  time_pct: timeDiffPercent,
   rate_1: row => rateSortValue(row.rate_1),
   rate_2: row => rateSortValue(row.rate_2),
   rate_diff: row => row.rate_diff_value,
@@ -839,6 +868,8 @@ if (typeof module !== 'undefined' && module.exports) {
     parseDistance,
     formatPowerDiff,
     formatSignedDiff,
+    timeDiffPercent,
+    formatPercentDiff,
     parseHeartRate,
     computeVam,
     achievementLabel,

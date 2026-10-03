@@ -1228,6 +1228,17 @@ const COLUMNS = [
     mark: row => isImprovement(row.time_diff_seconds, false)
   },
   {
+    key: 'time_pct',
+    className: 'col-diff',
+    label: () => 'Time Diff %',
+    csvLabel: () => 'Time Difference %',
+    headerTitle: () => "The time difference as a share of activity 1's time, so a short segment counts as much as a long one",
+    text: row => formatPercentDiff(timeDiffPercent(row)),
+    // 10% slower or faster reaches full tint.
+    style: row => diffStyle(timeDiffPercent(row), false, 10),
+    mark: row => isImprovement(timeDiffPercent(row), false)
+  },
+  {
     key: 'rate_1',
     className: 'col-speed',
     label: () => `${rateLabel} (${getDisplayName(1)})`,
@@ -1368,6 +1379,7 @@ const DEFAULT_SORT_DIRECTION = {
   time_1: 'asc',
   time_2: 'asc',
   time_diff: 'desc',
+  time_pct: 'desc',
   rate_1: 'desc',
   rate_2: 'desc',
   rate_diff: 'desc',
