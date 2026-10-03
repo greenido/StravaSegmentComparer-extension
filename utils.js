@@ -586,6 +586,40 @@ function summarizeComparison(matched, options = {}) {
 }
 
 /**
+ * A summary as plain text, for pasting into a chat or a club thread.
+ *
+ * The same reading as the panel above the table, in words: names say who
+ * gained where, since a paste carries no colours. Deltas are activity 2 minus
+ * activity 1, so activity 2 is the subject, as on screen.
+ *
+ * @param {object} summary  from summarizeComparison
+ * @param {{excludeNested?: boolean}} options  as the summary was made
+ * @returns {string} empty when nothing could be compared
+ */
+function summaryText(summary, name1, name2, options = {}) {
+  if (!summary || !summary.compared) return '';
+
+  const net = Math.round(summary.netSeconds);
+  const gap = formatTimeDiff(Math.abs(net)).replace(/^\+/, '');
+  const verdict = net === 0 ? `level with ${name1}` : `${gap} ${net > 0 ? 'slower' : 'faster'} than ${name1}`;
+  const segments = `${summary.compared} matched segment${summary.compared === 1 ? '' : 's'}`;
+  const list = rows => rows.map(row => `${row.name} ${row.time_diff}`).join(', ');
+
+  const lines = [
+    `${name2} was ${verdict} across ${segments}`,
+    `Faster on ${summary.fasterCount}, slower on ${summary.slowerCount}` +
+      (summary.evenCount ? `, level on ${summary.evenCount}` : '')
+  ];
+  if (summary.biggestLosses.length) lines.push(`Biggest losses: ${list(summary.biggestLosses)}`);
+  if (summary.biggestGains.length) lines.push(`Biggest gains: ${list(summary.biggestGains)}`);
+  if (options.excludeNested && summary.nestedCount) {
+    lines.push(`Leaving out ${summary.nestedCount} segment${summary.nestedCount === 1 ? '' : 's'} inside another`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * The running total of the per-segment deltas, in course order.
  *
  * The net number says the ride was ninety seconds slower; this says where those
@@ -885,6 +919,7 @@ if (typeof module !== 'undefined' && module.exports) {
     hasPowerData,
     hasPersonalRecords,
     summarizeComparison,
+    summaryText,
     cumulativeTimeDeltas,
     filterSegments,
     rateSortValue,

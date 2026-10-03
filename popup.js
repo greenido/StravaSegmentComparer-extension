@@ -25,6 +25,7 @@ const compareBtn = document.getElementById('compareBtn');
 const statusDiv = document.getElementById('status');
 const resultsDiv = document.getElementById('results');
 const exportBtn = document.getElementById('exportBtn');
+const copyBtn = document.getElementById('copyBtn');
 const prBtn = document.getElementById('prBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn');
@@ -72,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
   compareBtn.addEventListener('click', compareActivities);
   swapBtn.addEventListener('click', swapActivities);
   exportBtn.addEventListener('click', exportAsCSV);
+  copyBtn.addEventListener('click', copySummary);
   prBtn.addEventListener('click', loadPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
@@ -1898,6 +1900,28 @@ function exportAsCSV() {
     URL.revokeObjectURL(url);
     addLogEntry('CSV export completed', 'success');
   }, 100);
+}
+
+/**
+ * Copy the summary to the clipboard as plain text, for a chat or club thread.
+ *
+ * It says what the panel says, including whether nested segments are left
+ * out, so the paste matches what was on screen.
+ */
+async function copySummary() {
+  const summary = summarizeComparison(comparison.matched, { excludeNested });
+  const text = summaryText(summary, getDisplayName(1), getDisplayName(2), { excludeNested });
+  if (!text) {
+    showStatus('Nothing to copy yet — compare two activities first', 'error');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus('Summary copied to the clipboard', 'success');
+  } catch (error) {
+    showStatus(`Could not copy the summary: ${error.message}`, 'error');
+  }
 }
 
 /* ------------------------------------------------------------------ *

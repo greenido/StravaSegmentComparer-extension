@@ -490,7 +490,7 @@ describe('the results toolbar', () => {
   it('names each icon-only button, both aloud and in its tooltip', async () => {
     await loadPopup();
 
-    ['exportBtn', 'prBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
+    ['copyBtn', 'exportBtn', 'prBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
       const button = document.getElementById(id);
       expect(button.textContent.trim()).toBe('');
       expect(button.getAttribute('aria-label')).toBeTruthy();
@@ -1168,6 +1168,90 @@ describe('the time difference as a percentage', () => {
 
     const names = [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.firstChild.textContent);
     expect(names).toEqual(['Sprint', 'Climb']);
+  });
+});
+
+describe('copying the summary', () => {
+  let copied;
+
+  const stubClipboard = writeText => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  };
+  const copy = async () => {
+    document.getElementById('copyBtn').click();
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+
+  beforeEach(async () => {
+    await loadPopup();
+    copied = [];
+    stubClipboard(async text => {
+      copied.push(text);
+    });
+  });
+
+  it('copies what the summary panel says, as plain text', async () => {
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: [{ segmentId: '100', occurrence: 0, name: 'Old La Honda', time: tabId === 10 ? '18:20' : '18:35' }]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    await copy();
+
+    expect(copied).toEqual([
+      [
+        'Grace was 0:15 slower than Ada across 1 matched segment',
+        'Faster on 0, slower on 1',
+        'Biggest losses: Old La Honda +0:15'
+      ].join('\n')
+    ]);
+    expect(status().textContent).toBe('Summary copied to the clipboard');
+  });
+
+  it('says so, and copies nothing, before there is a comparison', async () => {
+    await copy();
+
+    expect(copied).toEqual([]);
+    expect(status().classList.contains('status-error')).toBe(true);
+  });
+
+  it('reports a clipboard that refuses', async () => {
+    stubClipboard(async () => {
+      throw new Error('Document is not focused.');
+    });
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [],
+        segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    await copy();
+
+    expect(status().textContent).toBe('Could not copy the summary: Document is not focused.');
   });
 });
 

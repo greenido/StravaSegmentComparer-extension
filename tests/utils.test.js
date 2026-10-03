@@ -31,7 +31,8 @@ import {
   markNestedSegments,
   filterSegments,
   timeDiffPercent,
-  formatPercentDiff
+  formatPercentDiff,
+  summaryText
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -329,6 +330,57 @@ describe('hasPowerData', () => {
     expect(hasPowerData([{ power_1: 'N/A', power_2: '245 W' }])).toBe(true);
     expect(hasPowerData([{ power_1: 'N/A', power_2: 'N/A' }])).toBe(false);
     expect(hasPowerData([])).toBe(false);
+  });
+});
+
+describe('summaryText', () => {
+  const diffRow = (name, seconds, extra = {}) => ({
+    name,
+    time_diff_seconds: seconds,
+    time_diff: (seconds > 0 ? '+' : seconds < 0 ? '-' : '') + `0:${String(Math.abs(seconds)).padStart(2, '0')}`,
+    ...extra
+  });
+
+  it('says who was faster, by how much, and where', () => {
+    const summary = summarizeComparison([
+      diffRow('Old La Honda', 45),
+      diffRow('Kings Mountain', 30),
+      diffRow('Page Mill', -20),
+      diffRow('Alpine', 0)
+    ]);
+
+    expect(summaryText(summary, 'Ada', 'Grace')).toBe(
+      [
+        'Grace was 0:55 slower than Ada across 4 matched segments',
+        'Faster on 1, slower on 2, level on 1',
+        'Biggest losses: Old La Honda +0:45, Kings Mountain +0:30',
+        'Biggest gains: Page Mill -0:20'
+      ].join('\n')
+    );
+  });
+
+  it('reads a net gain as faster, and a zero net as level', () => {
+    expect(summaryText(summarizeComparison([diffRow('Climb', -12)]), 'Ada', 'Grace').split('\n')[0]).toBe(
+      'Grace was 0:12 faster than Ada across 1 matched segment'
+    );
+    expect(
+      summaryText(summarizeComparison([diffRow('A', 10), diffRow('B', -10)]), 'Ada', 'Grace').split('\n')[0]
+    ).toBe('Grace was level with Ada across 2 matched segments');
+  });
+
+  it('says when segments inside others were left out, as the panel does', () => {
+    const rows = [diffRow('Lap', 30), diffRow('Climb', 10, { nestedIn: 'Lap' })];
+    const options = { excludeNested: true };
+
+    const text = summaryText(summarizeComparison(rows, options), 'Ada', 'Grace', options);
+
+    expect(text.split('\n')[0]).toBe('Grace was 0:30 slower than Ada across 1 matched segment');
+    expect(text).toContain('Leaving out 1 segment inside another');
+  });
+
+  it('is empty when nothing could be compared', () => {
+    expect(summaryText(summarizeComparison([]), 'Ada', 'Grace')).toBe('');
+    expect(summaryText(null, 'Ada', 'Grace')).toBe('');
   });
 });
 
