@@ -948,6 +948,76 @@ describe('comparing two activities that are already open', () => {
   });
 });
 
+describe('comparing two activities by the same athlete', () => {
+  const ride = (activityId, athleteName, time) => ({
+    activityId,
+    athleteName,
+    activityStats: [{ label: 'Distance', value: '10.0 km' }],
+    segments: [
+      { segmentId: '100', occurrence: 0, name: 'Climb', time, rate: '18.0 km/h' },
+      { segmentId: '101', occurrence: 0, name: 'Descent', time: '2:00', rate: '40.0 km/h' }
+    ]
+  });
+
+  const compare = async (name1, name2) => {
+    await loadPopup();
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) =>
+      request.action === 'ping'
+        ? { ok: true }
+        : { ok: true, data: tabId === 10 ? ride('1', name1, '5:00') : ride('2', name2, '5:10') };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  };
+
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+
+  it('tells the two columns apart by activity number, not the shared name', async () => {
+    // Two of your own rides is the most common comparison of all.
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    expect(headers()).toContain('Time (Activity 1)');
+    expect(headers()).toContain('Time (Activity 2)');
+    expect(headers().join()).not.toContain('Ada Lovelace');
+  });
+
+  it('says which activity was slower in the summary', async () => {
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    expect(document.querySelector('.summary-caption').textContent).toBe(
+      'Activity 2 slower than Activity 1 across 2 matched segments'
+    );
+  });
+
+  it('heads the stats panels and the CSV the same way', async () => {
+    await compare('Ada Lovelace', 'Ada Lovelace');
+
+    const panels = [...document.querySelectorAll('#activityStatsSection h3')].map(h => h.textContent);
+    expect(panels).toEqual(['Activity 1', 'Activity 2']);
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    expect(csv.split('\n')[0]).toContain('"Time (Activity 1)","Time (Activity 2)"');
+  });
+
+  it('treats names that differ only in case or spacing as the same athlete', async () => {
+    await compare('Ada Lovelace', ' ada  lovelace ');
+
+    expect(headers()).toContain('Time (Activity 1)');
+    expect(headers()).toContain('Time (Activity 2)');
+  });
+
+  it('keeps the names when the athletes differ', async () => {
+    await compare('Ada Lovelace', 'Grace Hopper');
+
+    expect(headers()).toContain('Time (Ada Lovelace)');
+    expect(headers()).toContain('Time (Grace Hopper)');
+  });
+});
+
 describe('comparing two activities when no Strava tab is open', () => {
   let opened;
   let removed;

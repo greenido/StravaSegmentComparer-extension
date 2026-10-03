@@ -879,9 +879,21 @@ function renderMyActivities(candidates, segmentCount) {
  * Rendering
  * ------------------------------------------------------------------ */
 
+/**
+ * What to call activity 1 or 2 in headers, the summary and the stats panels.
+ *
+ * The athlete's name, unless both activities are the same athlete's — the most
+ * common comparison of all, two of your own rides — where the name would label
+ * both columns alike. The activity number then says which is which, and matches
+ * the URL fields it came from.
+ */
 function getDisplayName(index) {
-  const name = index === 1 ? athlete1Name : athlete2Name;
-  return name && name.trim() ? name.trim() : `Activity ${index}`;
+  const clean = value => (value || '').replace(/\s+/g, ' ').trim();
+  const name = clean(index === 1 ? athlete1Name : athlete2Name);
+  const other = clean(index === 1 ? athlete2Name : athlete1Name);
+
+  if (!name || name.toLowerCase() === other.toLowerCase()) return `Activity ${index}`;
+  return name;
 }
 
 /** Only ever link to strava.com; segment names come from a page we don't own. */
