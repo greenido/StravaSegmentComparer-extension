@@ -27,6 +27,7 @@ const resultsDiv = document.getElementById('results');
 const exportBtn = document.getElementById('exportBtn');
 const copyBtn = document.getElementById('copyBtn');
 const prBtn = document.getElementById('prBtn');
+const refreshPrBtn = document.getElementById('refreshPrBtn');
 const logContent = document.getElementById('logContent');
 const clearBtn = document.getElementById('clearBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
@@ -75,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
   exportBtn.addEventListener('click', exportAsCSV);
   copyBtn.addEventListener('click', copySummary);
   prBtn.addEventListener('click', loadPersonalRecords);
+  refreshPrBtn.addEventListener('click', refreshPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
 
@@ -495,7 +497,7 @@ async function runExclusive(task) {
 function setRunControlsDisabled(disabled) {
   const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
   // Clear too: clearing under a run would only be undone when it finishes.
-  [compareBtn, swapBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
     button.disabled = disabled;
   });
 }
@@ -705,11 +707,19 @@ function segmentIdsToLookUp(segments) {
 /**
  * Your history on each of `segmentIds`: `{ pr, recent }` per segment, where
  * `recent` is null if Strava's history could not be read for it.
+ *
+ * `refresh` reads every one of them again, whatever the cache holds: a PR set
+ * this morning, or an upload since the last lookup, is not in a cached copy.
  */
-async function fetchSegmentHistories(segmentIds) {
+async function fetchSegmentHistories(segmentIds, { refresh = false } = {}) {
   const cache = await readHistoryCache();
-  const missing = segmentIds.filter(segmentId => !(segmentId in cache));
-  addLogEntry(`${segmentIds.length - missing.length} segment histories cached, ${missing.length} to fetch`, 'info');
+  const missing = refresh ? segmentIds : segmentIds.filter(segmentId => !(segmentId in cache));
+  addLogEntry(
+    refresh
+      ? `Reading all ${segmentIds.length} segment histories again, skipping the cache`
+      : `${segmentIds.length - missing.length} segment histories cached, ${missing.length} to fetch`,
+    'info'
+  );
   if (!missing.length) return cache;
 
   showStatus(`Reading your history on ${missing.length} segments...`, 'loading');
@@ -738,8 +748,9 @@ async function fetchSegmentHistories(segmentIds) {
         } catch (error) {
           // Cache the miss too, so one bad segment is not retried on every
           // click, but only briefly: the cause is usually gone in minutes.
+          // On a refresh, the copy already in hand beats nothing.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = {
+          cache[segmentId] = cache[segmentId] || {
             pr: null,
             recent: null,
             times: null,
@@ -791,7 +802,12 @@ function loadPersonalRecords() {
   return runExclusive(addPersonalRecords);
 }
 
-async function addPersonalRecords() {
+/** The same, reading every segment from Strava again rather than the cache. */
+function refreshPersonalRecords() {
+  return runExclusive(() => addPersonalRecords({ refresh: true }));
+}
+
+async function addPersonalRecords({ refresh = false } = {}) {
   if (!comparison.matched.length) {
     showStatus('Compare two activities first', 'error');
     return;
@@ -806,7 +822,7 @@ async function addPersonalRecords() {
   }
 
   try {
-    const cache = await fetchSegmentHistories(wanted);
+    const cache = await fetchSegmentHistories(wanted, { refresh });
 
     const prBySegmentId = {};
     const historyBySegmentId = {};

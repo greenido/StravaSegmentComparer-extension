@@ -490,7 +490,7 @@ describe('the results toolbar', () => {
   it('names each icon-only button, both aloud and in its tooltip', async () => {
     await loadPopup();
 
-    ['copyBtn', 'exportBtn', 'prBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
+    ['copyBtn', 'exportBtn', 'prBtn', 'refreshPrBtn', 'openTabBtn', 'clearBtn'].forEach(id => {
       const button = document.getElementById(id);
       expect(button.textContent.trim()).toBe('');
       expect(button.getAttribute('aria-label')).toBeTruthy();
@@ -1017,7 +1017,9 @@ describe('one run at a time', () => {
   };
   const actions = action => sent.filter(request => request.action === action).length;
   const runControls = () =>
-    ['compareBtn', 'swapBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
+    ['compareBtn', 'swapBtn', 'prBtn', 'refreshPrBtn', 'myActivitiesBtn', 'clearBtn'].map(id =>
+      document.getElementById(id)
+    );
 
   beforeEach(async () => {
     await loadPopup();
@@ -1651,6 +1653,62 @@ describe('comparing against your personal records', () => {
 
     await loadPersonalRecords();
     expect(sent.filter(r => r.action === 'fetchSegmentHistory').length).toBe(2);
+  });
+
+  describe('refreshing', () => {
+    const historyRequests = () => sent.filter(r => r.action === 'fetchSegmentHistory').length;
+    const prCell = index => [...document.querySelectorAll('#segmentsTableBody tr')[index].children].at(-2).textContent;
+
+    it('reads every segment from Strava again, skipping the cache', async () => {
+      const prs = { 100: '4:30', 101: '4:10' };
+      await setup(prs);
+      await loadPersonalRecords();
+      expect(prCell(0)).toBe('4:30');
+
+      // A PR set since the last lookup is not in the cached copy.
+      prs[100] = '4:20';
+      await loadPersonalRecords();
+      expect(prCell(0)).toBe('4:30');
+
+      await refreshPersonalRecords();
+
+      expect(historyRequests()).toBe(4);
+      expect(prCell(0)).toBe('4:20');
+    });
+
+    it('is what the Refresh my PRs button does', async () => {
+      await setup({ 100: '4:30', 101: '4:10' });
+      await loadPersonalRecords();
+
+      document.getElementById('refreshPrBtn').click();
+      // Requests are spaced out, so this takes real time.
+      const status = () => document.getElementById('status').textContent;
+      for (let i = 0; i < 60 && !(historyRequests() === 4 && status().startsWith('Found')); i++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      expect(historyRequests()).toBe(4);
+      expect(document.getElementById('status').textContent).toBe('Found your PR for 2 of 2 segments');
+    });
+
+    it('keeps the copy it had for a segment that fails to refresh', async () => {
+      const prs = { 100: '4:30', 101: '4:10' };
+      await setup(prs);
+      await loadPersonalRecords();
+
+      // Strava refuses one segment this time round.
+      prs[100] = '4:20';
+      const send = chrome.tabs.sendMessage;
+      chrome.tabs.sendMessage = async (tabId, request) => {
+        if (request.action === 'fetchSegmentHistory' && request.segmentId === '101') throw new Error('network boom');
+        return send(tabId, request);
+      };
+      await refreshPersonalRecords();
+
+      expect(prCell(0)).toBe('4:20');
+      // N/A would be a step backwards from the PR already known.
+      expect(prCell(1)).toBe('4:10');
+    });
   });
 
   describe('as time passes', () => {
