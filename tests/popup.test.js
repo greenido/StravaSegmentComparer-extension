@@ -1001,6 +1001,111 @@ describe('opening the popup', () => {
   });
 });
 
+describe('one run at a time', () => {
+  let sent;
+  let gate;
+  let release;
+
+  // Holds every activity read from here on until released, so a run can be
+  // caught mid-way.
+  const hold = () => {
+    gate = new Promise(resolve => (release = resolve));
+  };
+
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const actions = action => sent.filter(request => request.action === action).length;
+  const runControls = () =>
+    ['compareBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
+
+  beforeEach(async () => {
+    await loadPopup();
+    sent = [];
+    gate = Promise.resolve();
+
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      sent.push(request);
+      if (request.action === 'ping') return { ok: true };
+      if (request.action === 'fetchSegmentHistory') return { ok: true, pr: { time: '4:00' } };
+      await gate;
+      return {
+        ok: true,
+        data: {
+          activityId: String(tabId),
+          athleteName: tabId === 10 ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+        }
+      };
+    };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+  });
+
+  it('ignores a second comparison started while one is running', async () => {
+    hold();
+    const first = compareActivities();
+    await settle();
+
+    await compareActivities();
+    release();
+    await first;
+
+    expect(actions('extractSegmentData')).toBe(2);
+    expect(document.getElementById('status').textContent).toBe('Successfully compared 1 segments');
+  });
+
+  it('ignores a PR lookup started during a comparison', async () => {
+    // Earlier, the lookup would have applied PRs to whichever comparison was
+    // current when it finished, and saved the mix.
+    await compareActivities();
+
+    hold();
+    const second = compareActivities();
+    await settle();
+    await loadPersonalRecords();
+    release();
+    await second;
+
+    expect(actions('fetchSegmentHistory')).toBe(0);
+  });
+
+  it('disables the buttons that start a run, and the suggestions, until it finishes', async () => {
+    renderMyActivities([{ activityId: '7', name: 'Hill repeats', date: null, shared: 1 }], 1);
+    const suggestion = document.querySelector('#myActivitiesSection .activity-option');
+
+    hold();
+    const first = compareActivities();
+    await settle();
+    expect(runControls().every(button => button.disabled)).toBe(true);
+    expect(suggestion.disabled).toBe(true);
+
+    release();
+    await first;
+    expect(runControls().every(button => !button.disabled)).toBe(true);
+    expect(suggestion.disabled).toBe(false);
+  });
+
+  it('frees the buttons again when a run fails', async () => {
+    chrome.tabs.sendMessage = async () => {
+      throw new Error('boom');
+    };
+    chrome.tabs.create = async () => {
+      throw new Error('no tabs either');
+    };
+
+    await compareActivities();
+
+    expect(document.getElementById('status').textContent).toContain('Error');
+    expect(runControls().every(button => !button.disabled)).toBe(true);
+  });
+});
+
 describe('the sections under the table', () => {
   beforeEach(async () => {
     await loadPopup();

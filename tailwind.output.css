@@ -95,6 +95,13 @@ body {
    display. */
 .btn.hidden { display: none; }
 
+/* Waiting for a run to finish; see runExclusive in popup.js. */
+.btn:disabled,
+.activity-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* A square button with only an icon; its name is in data-tooltip. */
 .btn-icon {
   position: relative;

@@ -465,7 +465,42 @@ async function withProxyTab(fn) {
  * Comparison
  * ------------------------------------------------------------------ */
 
-async function compareActivities() {
+// Whether a comparison, a PR lookup or a "My Activities" search is running.
+let running = false;
+
+/**
+ * Run `task` unless another run is already in progress.
+ *
+ * All three write the status line, and the first two replace `comparison`, so
+ * two at once would interleave their messages and could save a mix of both.
+ * The buttons that start one are disabled meanwhile, and a click that gets
+ * through anyway — a suggested activity picked mid-run, say — is ignored.
+ */
+async function runExclusive(task) {
+  if (running) return;
+  running = true;
+  setRunControlsDisabled(true);
+  try {
+    await task();
+  } finally {
+    running = false;
+    setRunControlsDisabled(false);
+  }
+}
+
+function setRunControlsDisabled(disabled) {
+  const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
+  // Clear too: clearing under a run would only be undone when it finishes.
+  [compareBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+    button.disabled = disabled;
+  });
+}
+
+function compareActivities() {
+  return runExclusive(readAndCompare);
+}
+
+async function readAndCompare() {
   const activity1Url = activity1Input.value.trim();
   const activity2Url = activity2Input.value.trim();
 
@@ -482,7 +517,6 @@ async function compareActivities() {
     return;
   }
 
-  compareBtn.disabled = true;
   await chrome.storage.local.set({ activity1: activity1Url, activity2: activity2Url });
   showStatus('Fetching segment data from both activities...', 'loading');
 
@@ -527,8 +561,6 @@ async function compareActivities() {
     await saveComparison();
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    compareBtn.disabled = false;
   }
 }
 
@@ -731,7 +763,11 @@ async function fetchSegmentHistories(segmentIds) {
  * Note this is *your* PR as the signed-in athlete, which is only meaningful
  * when one of the two activities is yours.
  */
-async function loadPersonalRecords() {
+function loadPersonalRecords() {
+  return runExclusive(addPersonalRecords);
+}
+
+async function addPersonalRecords() {
   if (!comparison.matched.length) {
     showStatus('Compare two activities first', 'error');
     return;
@@ -744,8 +780,6 @@ async function loadPersonalRecords() {
     showStatus('No Strava segment ids in this comparison — click "Compare Activities" again, then retry', 'error');
     return;
   }
-
-  prBtn.disabled = true;
 
   try {
     const cache = await fetchSegmentHistories(wanted);
@@ -776,8 +810,6 @@ async function loadPersonalRecords() {
     }
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    prBtn.disabled = false;
   }
 }
 
@@ -791,7 +823,11 @@ const MY_ACTIVITIES_SHOWN = 5;
  * Suggest your other activities on activity 1's segments, most shared first,
  * so activity 2 can be picked instead of hunted for.
  */
-async function findMyActivities() {
+function findMyActivities() {
+  return runExclusive(suggestMyActivities);
+}
+
+async function suggestMyActivities() {
   const activity1Url = activity1Input.value.trim();
   if (!isValidStravaActivityUrl(activity1Url)) {
     showStatus('Enter or auto-detect Activity 1 first', 'error');
@@ -799,7 +835,6 @@ async function findMyActivities() {
   }
   const activity1Id = extractActivityIdFromUrl(activity1Url);
 
-  myActivitiesBtn.disabled = true;
   myActivitiesSection.classList.add('hidden');
 
   try {
@@ -831,8 +866,6 @@ async function findMyActivities() {
     }
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    myActivitiesBtn.disabled = false;
   }
 }
 
