@@ -1,5 +1,39 @@
 # Changelog
 
+## Version 2.9 - Fairer gaps, fewer surprises
+
+### 🆕 New Features
+
+- **Swap activities**: a ⇄ button between the URL fields swaps activity 1 and
+  2. A comparison on screen is redone the other way round, so the table always
+  matches the fields
+- **Time Diff %**: each segment's time difference as a share of activity 1's
+  time, so a short segment counts as much as a long one. Tinted and arrowed
+  like the other deltas, sortable, and in the CSV. Comparisons saved by 2.8
+  show it too
+- **Copy summary**: puts the summary on the clipboard as plain text — who was
+  faster and by how much, the counts, the biggest losses and gains — ready for
+  a chat or club thread
+- **Refresh my PRs**: reads your PRs and history from Strava again, skipping
+  the day-long cache, so a PR set since the last lookup shows up. A segment
+  that fails to refresh keeps the copy it had
+
+### 🔧 Fixes and internals
+
+- Background tabs opened to read an activity are closed even if you close the
+  popup first. The service worker keeps the list and closes what is left
+- A segment whose history could not be read (a rate limit, a network blip) is
+  retried after 10 minutes instead of showing N/A for a day
+- Two activities by the same athlete are labelled Activity 1 and Activity 2,
+  instead of both columns carrying the same name
+- Opening the popup without Strava tabs no longer shows a red error; clicking
+  Auto-Detect still reports what it found
+- The unmatched-segments list and the stats panels keep one order under the
+  table after sorting or filtering
+- A comparison, PR lookup and "My Activities Here" search run one at a time,
+  and the buttons that start them are dimmed while one runs
+- The README no longer lists the `tabs` permission removed in 2.7
+
 ## Version 2.8 - Your history, your form
 
 ### 🆕 New Features
