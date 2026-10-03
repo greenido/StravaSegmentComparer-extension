@@ -40,12 +40,12 @@ function stubChrome(overrides = {}) {
   };
 }
 
-async function loadPopup() {
+async function loadPopup(chromeOverrides) {
   const html = read('popup.html');
   const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/)[1].replace(/<script[\s\S]*?<\/script>/g, '');
 
   document.body.innerHTML = body;
-  globalThis.chrome = stubChrome();
+  globalThis.chrome = stubChrome(chromeOverrides);
 
   // Indirect eval runs these as classic scripts, matching how the popup loads
   // them, so their function declarations land on the global object.
@@ -945,6 +945,59 @@ describe('comparing two activities that are already open', () => {
     const [header, first] = captured[0].split('\n');
     expect(header).toContain('"Pace (Ada)"');
     expect(first).toBe('"Mile 1","5:00","5:05","+0:05","5:30 /km","5:30 /km","0:00 /km"');
+  });
+});
+
+describe('opening the popup', () => {
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+  const log = () => document.getElementById('logContent').textContent;
+  const withTabs = tabs => ({ tabs: { ...stubChrome().tabs, query: async () => tabs } });
+
+  it('does not report an error just because no activity tab is open', async () => {
+    // Nobody asked, and the restored comparison sits right under the banner.
+    await loadPopup();
+    await settle();
+
+    expect(status().classList.contains('hidden')).toBe(true);
+    expect(log()).toContain('Found 0 open Strava activity tabs');
+  });
+
+  it('still fills the fields from the open tabs, without a banner', async () => {
+    await loadPopup(
+      withTabs([
+        { id: 10, url: 'https://www.strava.com/activities/1' },
+        { id: 20, url: 'https://www.strava.com/activities/2' }
+      ])
+    );
+    await settle();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/1');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/2');
+    expect(status().classList.contains('hidden')).toBe(true);
+  });
+
+  it('reports it when Auto-Detect is clicked and finds nothing', async () => {
+    await loadPopup();
+    await settle();
+
+    document.getElementById('autoDetectBtn').click();
+    await settle();
+
+    expect(status().classList.contains('status-error')).toBe(true);
+    expect(status().textContent).toContain('No open Strava activity tabs found');
+  });
+
+  it('reports what it found when Auto-Detect is clicked', async () => {
+    await loadPopup(withTabs([{ id: 10, url: 'https://www.strava.com/activities/1' }]));
+    await settle();
+
+    document.getElementById('autoDetectBtn').click();
+    await settle();
+
+    expect(status().textContent).toContain('Found 1 Strava activity');
   });
 });
 

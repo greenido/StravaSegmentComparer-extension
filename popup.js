@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   compareBtn.addEventListener('click', compareActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   prBtn.addEventListener('click', loadPersonalRecords);
-  autoDetectBtn.addEventListener('click', autoPopulateActivityUrls);
+  autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
 
   helpBtn.addEventListener('click', e => {
@@ -117,7 +117,7 @@ async function restoreState() {
   }
 
   // Open tabs win over saved URLs.
-  autoPopulateActivityUrls();
+  autoPopulateActivityUrls({ quiet: true });
 }
 
 async function clearResults() {
@@ -191,16 +191,28 @@ async function findActivityTabs() {
     .sort((a, b) => a.id - b.id);
 }
 
-async function autoPopulateActivityUrls() {
+/**
+ * Fill the URL fields from the open activity tabs.
+ *
+ * Clicking Auto-Detect reports the outcome in the status line. Opening the
+ * popup runs it `quiet`, logging only: no open tabs is not an error when nobody
+ * asked, and a red banner on every open would sit on top of the comparison
+ * restored underneath it.
+ */
+async function autoPopulateActivityUrls({ quiet = false } = {}) {
+  const report = quiet ? addLogEntry : showStatus;
+
   try {
     addLogEntry('Searching for open Strava activity tabs...', 'info');
-    showStatus('Scanning open tabs for Strava activities...', 'loading');
+    if (!quiet) showStatus('Scanning open tabs for Strava activities...', 'loading');
 
     const stravaActivityTabs = await findActivityTabs();
     addLogEntry(`Found ${stravaActivityTabs.length} open Strava activity tabs`, 'info');
 
     if (!stravaActivityTabs.length) {
-      showStatus('❌ No open Strava activity tabs found - please navigate to Strava activities first', 'error');
+      if (!quiet) {
+        showStatus('❌ No open Strava activity tabs found - please navigate to Strava activities first', 'error');
+      }
       return;
     }
 
@@ -210,9 +222,9 @@ async function autoPopulateActivityUrls() {
     if (stravaActivityTabs.length >= 2) {
       activity2Input.value = stravaActivityTabs[1].url;
       addLogEntry(`Auto-populated Activity 2: ${extractActivityIdFromUrl(stravaActivityTabs[1].url)}`, 'success');
-      showStatus('✅ Auto-detected 2 Strava activities - ready to compare!', 'success');
+      report('✅ Auto-detected 2 Strava activities - ready to compare!', 'success');
     } else {
-      showStatus('⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually', 'info');
+      report('⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually', 'info');
     }
 
     if (stravaActivityTabs.length > 2) {
@@ -225,7 +237,7 @@ async function autoPopulateActivityUrls() {
     });
   } catch (error) {
     addLogEntry(`Error auto-detecting Strava tabs: ${error.message}`, 'error');
-    showStatus(`Error scanning tabs: ${error.message}`, 'error');
+    if (!quiet) showStatus(`Error scanning tabs: ${error.message}`, 'error');
   }
 }
 
