@@ -1001,6 +1001,52 @@ describe('opening the popup', () => {
   });
 });
 
+describe('the sections under the table', () => {
+  beforeEach(async () => {
+    await loadPopup();
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    const segment = (segmentId, name, time) => ({ segmentId, occurrence: 0, name, time, rate: '18.0 km/h' });
+    chrome.tabs.sendMessage = async tabId => ({
+      ok: true,
+      data: {
+        activityId: String(tabId),
+        athleteName: tabId === 10 ? 'Ada' : 'Grace',
+        activityStats: [{ label: 'Distance', value: '10.0 km' }],
+        segments:
+          tabId === 10
+            ? [segment('100', 'Climb', '5:00'), segment('101', 'Descent', '2:00'), segment('102', 'Sprint', '0:30')]
+            : [segment('100', 'Climb', '5:10'), segment('101', 'Descent', '1:55')]
+      }
+    });
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+  });
+
+  const order = () =>
+    [...document.querySelectorAll('#unmatchedSection, #activityStatsSection')].map(section => section.id);
+
+  it('lists the unmatched segments first, then the activity stats', () => {
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+
+  it('keeps that order after sorting', () => {
+    document.querySelector('#segmentsTable thead th.sortable').click();
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+
+  it('keeps that order after filtering', () => {
+    const search = document.getElementById('tableSearch');
+    search.value = 'climb';
+    search.dispatchEvent(new Event('input'));
+
+    expect(order()).toEqual(['unmatchedSection', 'activityStatsSection']);
+  });
+});
+
 describe('comparing two activities by the same athlete', () => {
   const ride = (activityId, athleteName, time) => ({
     activityId,

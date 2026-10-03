@@ -1690,7 +1690,7 @@ function renderUnmatched(data) {
   addGroup(data.onlyIn1, getDisplayName(1));
   addGroup(data.onlyIn2, getDisplayName(2));
 
-  document.getElementById('segmentsTable').parentElement.insertAdjacentElement('afterend', section);
+  document.getElementById('unmatchedSlot').replaceChildren(section);
 }
 
 /** Side-by-side activity stats, aligned on a shared, ordered label set. */
@@ -1787,8 +1787,7 @@ function displayStatsComparison(stats1, stats2) {
   wrapper.appendChild(buildColumn(getDisplayName(2), map2));
   section.appendChild(wrapper);
 
-  const segmentsTable = document.getElementById('segmentsTable');
-  segmentsTable.parentElement.insertAdjacentElement('afterend', section);
+  document.getElementById('activityStatsSlot').replaceChildren(section);
 }
 
 /* ------------------------------------------------------------------ *
