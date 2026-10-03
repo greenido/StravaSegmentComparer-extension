@@ -1017,7 +1017,7 @@ describe('one run at a time', () => {
   };
   const actions = action => sent.filter(request => request.action === action).length;
   const runControls = () =>
-    ['compareBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
+    ['compareBtn', 'swapBtn', 'prBtn', 'myActivitiesBtn', 'clearBtn'].map(id => document.getElementById(id));
 
   beforeEach(async () => {
     await loadPopup();
@@ -1103,6 +1103,70 @@ describe('one run at a time', () => {
 
     expect(document.getElementById('status').textContent).toContain('Error');
     expect(runControls().every(button => !button.disabled)).toBe(true);
+  });
+});
+
+describe('swapping activity 1 and 2', () => {
+  let extracted;
+
+  beforeEach(async () => {
+    await loadPopup();
+    extracted = 0;
+    chrome.tabs.query = async () => [
+      { id: 10, url: 'https://www.strava.com/activities/1' },
+      { id: 20, url: 'https://www.strava.com/activities/2' }
+    ];
+    chrome.tabs.sendMessage = async (tabId, request) => {
+      if (request.action === 'ping') return { ok: true };
+      extracted += 1;
+      return {
+        ok: true,
+        data: {
+          activityId: String(tabId),
+          athleteName: tabId === 10 ? 'Ada' : 'Grace',
+          activityStats: [],
+          segments: [{ segmentId: '100', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+        }
+      };
+    };
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+  });
+
+  const swap = async () => {
+    document.getElementById('swapBtn').click();
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+
+  it('swaps the two URLs, and remembers them that way round', async () => {
+    await swap();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/2');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/1');
+    const saved = await chrome.storage.local.get(['activity1', 'activity2']);
+    expect(saved).toEqual({
+      activity1: 'https://www.strava.com/activities/2',
+      activity2: 'https://www.strava.com/activities/1'
+    });
+  });
+
+  it('does not fetch anything when there is no comparison on screen', async () => {
+    await swap();
+    expect(extracted).toBe(0);
+  });
+
+  it('redoes a comparison on screen the other way round', async () => {
+    await compareActivities();
+    expect(headers()).toContain('Time (Ada)');
+    expect(document.querySelector('.summary-net').textContent).toBe('+0:10');
+
+    await swap();
+
+    // Activity 1 is now Grace's, so the gap reads the other way.
+    expect(headers().indexOf('Time (Grace)')).toBeLessThan(headers().indexOf('Time (Ada)'));
+    expect(document.querySelector('.summary-net').textContent).toBe('-0:10');
+    expect(extracted).toBe(4);
   });
 });
 

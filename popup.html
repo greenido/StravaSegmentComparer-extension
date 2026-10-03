@@ -51,13 +51,19 @@
     </div>
     
     <div class="card mb-4">
-      <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="url-pair mb-4">
         <div>
           <label for="activity1" class="block text-sm font-bold mb-2 text-gray-700">Activity 1 URL:</label>
-          <input type="url" id="activity1" placeholder="Auto-detected or enter manually..." required 
+          <input type="url" id="activity1" placeholder="Auto-detected or enter manually..." required
                  class="input-field">
         </div>
-        
+
+        <button id="swapBtn" type="button" class="swap-btn" aria-label="Swap activity 1 and 2" title="Swap activity 1 and 2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+          </svg>
+        </button>
+
         <div>
           <label for="activity2" class="block text-sm font-bold mb-2 text-gray-700">Activity 2 URL:</label>
           <input type="url" id="activity2" placeholder="Auto-detected or enter manually..." required 

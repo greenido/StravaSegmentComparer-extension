@@ -20,6 +20,7 @@ const STORAGE_KEYS = [
 // DOM Elements
 const activity1Input = document.getElementById('activity1');
 const activity2Input = document.getElementById('activity2');
+const swapBtn = document.getElementById('swapBtn');
 const compareBtn = document.getElementById('compareBtn');
 const statusDiv = document.getElementById('status');
 const resultsDiv = document.getElementById('results');
@@ -69,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTabView();
 
   compareBtn.addEventListener('click', compareActivities);
+  swapBtn.addEventListener('click', swapActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   prBtn.addEventListener('click', loadPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
@@ -491,7 +493,7 @@ async function runExclusive(task) {
 function setRunControlsDisabled(disabled) {
   const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
   // Clear too: clearing under a run would only be undone when it finishes.
-  [compareBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+  [compareBtn, swapBtn, prBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
     button.disabled = disabled;
   });
 }
@@ -562,6 +564,26 @@ async function readAndCompare() {
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
   }
+}
+
+/**
+ * Swap activity 1 and activity 2.
+ *
+ * Which is which matters: every delta is activity 2 minus activity 1, and the
+ * PR and history columns read activity 1's times. A comparison on screen is
+ * redone the other way round rather than left describing fields that no longer
+ * match it; a re-read of open tabs is cheap, and the PR lookup is cached.
+ */
+async function swapActivities() {
+  if (running) return;
+
+  [activity1Input.value, activity2Input.value] = [activity2Input.value, activity1Input.value];
+  await chrome.storage.local.set({ activity1: activity1Input.value, activity2: activity2Input.value });
+  addLogEntry('Swapped activity 1 and activity 2', 'info');
+
+  const showing = !resultsDiv.classList.contains('hidden') && comparison.matched.length > 0;
+  const bothValid = [activity1Input, activity2Input].every(input => isValidStravaActivityUrl(input.value.trim()));
+  if (showing && bothValid) await compareActivities();
 }
 
 /**
