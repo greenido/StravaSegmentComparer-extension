@@ -2,7 +2,7 @@
 //
 // Loads the real popup.html and popup.js into jsdom with a stubbed chrome API,
 // so the wiring and the rendering path are exercised, not just the pure helpers.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1154,7 +1154,7 @@ describe('comparing against your personal records', () => {
     expect(sizes.at(-1)).toBe(6);
   });
 
-  it('keeps going when one segment fails, and does not retry it', async () => {
+  it('keeps going when one segment fails, and does not retry it straight away', async () => {
     await setup({ 100: '4:30', 101: '4:10' }, { failOn: '101' });
     await loadPersonalRecords();
 
@@ -1164,6 +1164,57 @@ describe('comparing against your personal records', () => {
 
     await loadPersonalRecords();
     expect(sent.filter(r => r.action === 'fetchSegmentHistory').length).toBe(2);
+  });
+
+  describe('as time passes', () => {
+    const realNow = Date.now;
+    let now;
+
+    beforeEach(() => {
+      now = realNow();
+      Date.now = () => now;
+    });
+    afterEach(() => {
+      Date.now = realNow;
+    });
+
+    const historyRequests = () => sent.filter(r => r.action === 'fetchSegmentHistory').map(r => r.segmentId);
+
+    it('retries a failed segment after ten minutes, not a day', async () => {
+      // A rate limit or a network blip is gone in minutes; N/A for a day is not.
+      await setup({ 100: '4:30', 101: '4:10' }, { failOn: '101' });
+      await loadPersonalRecords();
+
+      now += 11 * 60 * 1000;
+      await loadPersonalRecords();
+
+      // Only the failed one is asked for again.
+      expect(historyRequests()).toEqual(['100', '101', '101']);
+    });
+
+    it('retries soon when only the segment page could be read', async () => {
+      // The PR is there, but the history behind it (and "My Activities") is not.
+      await setup({ 100: '4:30', 101: '4:10' }, { historyError: 'Strava returned HTTP 429' });
+      await loadPersonalRecords();
+
+      now += 11 * 60 * 1000;
+      await loadPersonalRecords();
+
+      expect(historyRequests()).toHaveLength(4);
+    });
+
+    it('keeps a segment that was read properly for a day', async () => {
+      await setup({ 100: '4:30', 101: '4:10' });
+      await loadPersonalRecords();
+
+      now += 23 * 60 * 60 * 1000;
+      await loadPersonalRecords();
+      expect(historyRequests()).toHaveLength(2);
+
+      now += 2 * 60 * 60 * 1000;
+      await loadPersonalRecords();
+      expect(historyRequests()).toHaveLength(4);
+    });
   });
 
   it('asks for a fresh comparison, rather than fetching, when no segment has an id', async () => {

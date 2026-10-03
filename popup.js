@@ -591,6 +591,10 @@ const HISTORY_CACHE_KEY = 'segmentHistoryCache';
 // Where 2.6 kept PRs alone; cleared on the next write.
 const LEGACY_PR_CACHE_KEY = 'prCache';
 const HISTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// A segment whose history could not be read is tried again much sooner. The
+// usual reasons — a rate limit, a network blip, a moment signed out — pass in
+// minutes, and holding on to one for a day would show N/A for a day.
+const HISTORY_RETRY_AFTER_MS = 10 * 60 * 1000;
 const HISTORY_FETCH_CONCURRENCY = 3;
 const HISTORY_MAX_SEGMENTS = 60;
 // How often the cache is written back while a run is in progress. Also the
@@ -601,16 +605,16 @@ const HISTORY_FLUSH_EVERY = 5;
 // rather than a burst at Strava.
 const HISTORY_FETCH_SPACING_MS = 250;
 
-/** Read the history cache, dropping entries older than the TTL. */
+/** Read the history cache, dropping entries older than their TTL. */
 async function readHistoryCache() {
   const data = await chrome.storage.local.get(HISTORY_CACHE_KEY);
   const cached = data[HISTORY_CACHE_KEY] || {};
   const fresh = {};
 
   Object.entries(cached).forEach(([segmentId, entry]) => {
-    if (entry && Date.now() - (entry.fetchedAt || 0) < HISTORY_CACHE_TTL_MS) {
-      fresh[segmentId] = entry;
-    }
+    if (!entry) return;
+    const ttl = entry.incomplete ? HISTORY_RETRY_AFTER_MS : HISTORY_CACHE_TTL_MS;
+    if (Date.now() - (entry.fetchedAt || 0) < ttl) fresh[segmentId] = entry;
   });
 
   return fresh;
@@ -658,12 +662,23 @@ async function fetchSegmentHistories(segmentIds) {
             recent: response.recent || null,
             times: response.times || null,
             effortCount: response.effortCount || null,
+            // The PR came from the segment page, without the history behind
+            // it, so the history is worth asking for again soon.
+            incomplete: Boolean(response.historyError),
             fetchedAt: Date.now()
           };
         } catch (error) {
-          // Cache the miss too, so one bad segment is not retried on every click.
+          // Cache the miss too, so one bad segment is not retried on every
+          // click, but only briefly: the cause is usually gone in minutes.
           addLogEntry(`Segment ${segmentId}: ${error.message}`, 'warning');
-          cache[segmentId] = { pr: null, recent: null, times: null, effortCount: null, fetchedAt: Date.now() };
+          cache[segmentId] = {
+            pr: null,
+            recent: null,
+            times: null,
+            effortCount: null,
+            incomplete: true,
+            fetchedAt: Date.now()
+          };
         }
 
         done += 1;
