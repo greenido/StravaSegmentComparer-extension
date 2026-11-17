@@ -251,7 +251,11 @@ function toggleHelpSection() {
   const nowVisible = helpSection.classList.toggle('hidden') === false;
   helpBtn.classList.toggle('active', nowVisible);
   helpBtn.title = nowVisible ? 'Hide help and tips' : 'Show help and tips';
+  helpBtn.setAttribute('aria-label', nowVisible ? 'Hide help and tips' : 'Show help and tips');
   helpBtn.setAttribute('aria-expanded', String(nowVisible));
+  helpBtn.dataset.tooltip = nowVisible ? 'Hide tips' : 'Quick tips';
+  const label = helpBtn.querySelector('.help-btn__label');
+  if (label) label.textContent = nowVisible ? 'Close' : 'Help';
 }
 
 /* ------------------------------------------------------------------ *

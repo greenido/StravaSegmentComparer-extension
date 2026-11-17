@@ -217,60 +217,142 @@ body {
   padding: 0.75rem;
 }
 
-.help-icon {
+.help-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.35rem 0.7rem 0.35rem 0.4rem;
+  border: 1px solid rgba(252, 76, 2, 0.22);
+  border-radius: 9999px;
+  background: linear-gradient(180deg, #fff7f3 0%, #ffffff 100%);
+  color: #c2410c;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(252, 76, 2, 0.08);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.help-btn__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid #e5e7eb;
+  width: 1.35rem;
+  height: 1.35rem;
   border-radius: 9999px;
-  background-color: #ffffff;
-  color: #374151;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: rgba(252, 76, 2, 0.12);
+  color: #fc4c02;
+  flex-shrink: 0;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
-.help-icon:hover {
-  background-color: #f9fafb;
-  color: #111827;
-  border-color: #d1d5db;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+.help-btn__icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.help-btn__label {
+  padding-right: 0.1rem;
+}
+
+.help-btn:hover {
+  border-color: rgba(252, 76, 2, 0.4);
+  color: #9a3412;
+  background: linear-gradient(180deg, #ffefe8 0%, #fff8f5 100%);
+  box-shadow: 0 3px 10px rgba(252, 76, 2, 0.14);
   transform: translateY(-1px);
 }
 
-.help-icon:focus {
+.help-btn:hover .help-btn__icon {
+  background: rgba(252, 76, 2, 0.18);
+  transform: scale(1.05);
+}
+
+.help-btn:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
 }
 
-.help-icon.active {
-  background-color: #2563eb;
+.help-btn:focus-visible {
+  box-shadow: 0 0 0 3px rgba(252, 76, 2, 0.25);
+}
+
+.help-btn:active {
+  transform: translateY(0);
+}
+
+.help-btn.active {
+  background: linear-gradient(180deg, #fc4c02 0%, #e34500 100%);
   color: #ffffff;
-  border-color: #2563eb;
-  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+  border-color: #e34500;
+  box-shadow: 0 4px 14px rgba(252, 76, 2, 0.28);
 }
 
-/* Optional tooltip using native title replacement (attribute selector) */
-.help-icon[data-tooltip] {
-  position: relative;
+.help-btn.active .help-btn__icon {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
 }
 
-.help-icon[data-tooltip]:hover::after,
+.help-btn.active:hover {
+  background: linear-gradient(180deg, #ff5a14 0%, #e34500 100%);
+  color: #ffffff;
+  border-color: #e34500;
+}
+
+.help-btn[data-tooltip]:hover::after,
+.help-btn[data-tooltip]:focus-visible::after,
 .btn-icon[data-tooltip]:hover::after,
 .btn-icon[data-tooltip]:focus-visible::after {
   content: attr(data-tooltip);
   position: absolute;
   right: 0;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   white-space: nowrap;
   background: #111827;
   color: #f9fafb;
   font-size: 10px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 5px 8px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
   z-index: 10;
+  pointer-events: none;
+}
+
+.help-panel {
+  border: 1px solid rgba(252, 76, 2, 0.18);
+  background: linear-gradient(180deg, #fffaf7 0%, #ffffff 42%);
+  box-shadow: 0 4px 16px rgba(252, 76, 2, 0.06);
+}
+
+.help-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-right: 0.5rem;
+  border-radius: 9999px;
+  background: rgba(252, 76, 2, 0.12);
+  color: #fc4c02;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.help-panel__steps {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
 }
 
 .log-header {
