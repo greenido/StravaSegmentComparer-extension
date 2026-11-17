@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 2.10 - Clearer help
+
+### 🆕 Improvements
+
+- **Help control**: the header help icon is now a Strava-branded labeled chip
+  that switches to Close when open, with matching panel styling so tips are
+  easier to find and dismiss
+
 ## Version 2.9 - Fairer gaps, fewer surprises
 
 ### 🆕 New Features
