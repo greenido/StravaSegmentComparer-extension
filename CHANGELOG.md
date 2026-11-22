@@ -1,5 +1,17 @@
 # Changelog
 
+## Version 2.11 - Polish
+
+### 🔧 Fixes and internals
+
+- The logo beside the title shows again: its padding was wider than the image,
+  so the image had no room and only a blank gap was drawn
+- A clearer one-line summary for the Chrome Web Store: "Compare two Strava
+  activities segment by segment: see where you gained or lost time vs. a
+  friend, an old ride or your PRs."
+- Removed a CSS rule whose selector was invalid and so never applied, along
+  with the classes that pointed at it. The popup looks and scrolls as before
+
 ## Version 2.10 - Clearer help
 
 ### 🆕 Improvements
