@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Strava Segment Comparator",
-  "version": "2.11",
+  "version": "2.12",
   "description": "Compare two Strava activities segment by segment: see where you gained or lost time vs. a friend, an old ride or your PRs.",
   "permissions": ["storage", "contextMenus"],
   "host_permissions": ["https://www.strava.com/*"],

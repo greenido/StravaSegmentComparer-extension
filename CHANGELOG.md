@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Version 2.12 - Group rides, fewer clicks
 
 ### 🆕 Improvements
 
