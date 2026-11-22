@@ -9,11 +9,14 @@ If you have questions or issues, please open an issue on GitHub.
 ## Features
 
 - **Auto-detect open Strava activity tabs**: Fills the URLs from your open activity tabs — the one you are looking at and the one you used before it, with the one opened first as activity 1. Opening the popup does this quietly; the Auto-Detect button also says what it found
+- **Compare from Strava's pages**: A “⇄ Compare…” button on every activity page, and the same in the right-click menu on activity links. Pick one activity, then another, and the comparison opens in a tab
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
+- **Recent comparisons**: The last ten pairs, one pick away from being compared again
 - **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort, and is closed again even if you close the popup first
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
 - **Time Diff %**: Each time difference as a share of activity 1's time, so a short segment counts as much as a long one
 - **Copy summary**: The summary as plain text on your clipboard, ready for a chat or club thread
+- **Copy as image**: The same summary, with the gap chart, as a PNG to paste anywhere
 - **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
 - **Swap activities**: One click swaps activity 1 and 2. A comparison on screen is redone the other way round
 - **Sortable columns**: Click a header to sort; click again to reverse
@@ -58,7 +61,7 @@ shows every column.
 3. Click “Load unpacked” and select this project folder
 4. Pin the extension (optional) and open it from the toolbar
 
-Required permissions: `storage`, and host access to `https://www.strava.com/*` (see `manifest.json`). There is no `tabs` permission: host access already shows the extension the URLs of your Strava tabs, and no others.
+Required permissions: `storage`, `contextMenus` (the right-click “Pick this activity to compare”; no install warning), and host access to `https://www.strava.com/*` (see `manifest.json`). There is no `tabs` permission: host access already shows the extension the URLs of your Strava tabs, and no others.
 
 ## Usage
 
@@ -73,6 +76,25 @@ Required permissions: `storage`, and host access to `https://www.strava.com/*` (
 
 1. Copy/paste two activity URLs into the input fields
 2. Click “Compare Activities”
+
+### From Strava's pages
+
+1. On an activity page, click “⇄ Compare…” in the bottom-right corner (or
+   right-click an activity link and choose “Pick this activity to compare”)
+2. Open another activity and click “⇄ Compare with …” there (or right-click it)
+3. The comparison opens in a tab, with the first activity you picked as
+   activity 1
+
+The × next to the button cancels a pick. While one is waiting the toolbar icon
+shows a “1”. The button is drawn in its own corner of the window, not inside
+Strava's layout, so a Strava redesign does not move or break it.
+
+### Recent comparisons
+
+The last ten pairs you compared are in a dropdown under the buttons, named by
+athlete or, for two of your own activities, by activity name, with the net gap
+and the date. Picking one reads both activities again, so the result is
+current. Clear does not empty the list.
 
 ### Swapping activities
 
@@ -107,6 +129,10 @@ The **Time Diff %** column is the length-fair reading: each segment's time
 difference as a share of activity 1's time there. Ten seconds is 20% on a
 50-second sprint and under 1% on a twenty-minute climb, so sorting by it puts
 the segments where activity 2 was *relatively* slowest on top.
+
+The image button next to it copies the same reading, with the gap chart, as a
+PNG — for a chat where a table will not paste. If the browser refuses the
+clipboard, the image is downloaded instead.
 
 “Copy summary” puts the same reading on your clipboard as plain text: who was
 faster and by how much, the faster/slower counts, and the biggest losses and
@@ -169,6 +195,9 @@ Some caveats worth knowing:
 
 - The PR is **yours**, as the signed-in Strava athlete. It is only meaningful
   when one of the two activities is yours
+- The summary then adds your PRs up — what your best on these segments totals
+  and how far activity 1 was from it — counting only segments where both are
+  known
 - It is read from your effort history on each segment
   (`/athlete/segments/{id}/history`, the JSON Strava’s own site uses), and the
   PR is your fastest elapsed time there. If that endpoint fails, the segment’s
@@ -238,7 +267,8 @@ Files:
 - `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or look up your effort history on a segment (your PR and recent activities there; the segment page is the fallback for the PR). It only fetches from an allowlist of paths, and waits for the segments table with a `MutationObserver` instead of a fixed sleep
 - `popup.js`: tab detection, route selection, comparison, rendering, CSV export. The table's columns are declared once in `COLUMNS`, which drives the headers, the cells and the CSV together
 - `utils.js`: pure parsing and comparison helpers (times, speeds, paces, power, heart rate, VAM, distances, segment matching, sorting, summary, ranking your activities)
-- `background.js`: MV3 service worker. Its one job is closing the background tabs a popup opened, if the popup is closed before it could
+- `background.js`: MV3 service worker. Closes the background tabs a popup opened if the popup is closed before it could, and keeps the pick made from Strava's pages: the right-click menu, the toolbar badge, and opening the comparison tab on the second pick
+- `page-button.js`: the “⇄ Compare…” button on activity pages, in a shadow root fixed to the window corner. It only draws the pick state the service worker keeps
 
 ## Development
 

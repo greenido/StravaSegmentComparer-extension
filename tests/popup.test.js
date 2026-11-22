@@ -2205,3 +2205,263 @@ describe('finding your other activities on these segments', () => {
     expect(toStaleTab.every(action => action === 'ping')).toBe(true);
   });
 });
+
+describe('a comparison asked for by the button on Strava', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'));
+
+  it('compares the two activities the link names, first pick as activity 1', async () => {
+    window.history.replaceState({}, '', '/popup.html?view=tab&compare=111,222');
+    const read = [];
+    await loadPopup({
+      tabs: {
+        ...stubChrome().tabs,
+        query: async () => [
+          { id: 10, url: 'https://www.strava.com/activities/111' },
+          { id: 20, url: 'https://www.strava.com/activities/222' },
+          { id: 30, url: 'https://www.strava.com/activities/333' }
+        ],
+        sendMessage: async (tabId, request) => {
+          if (request.action === 'ping') return { ok: true };
+          read.push(tabId);
+          return {
+            ok: true,
+            data: {
+              athleteName: tabId === 10 ? 'Ada' : 'Grace',
+              activityStats: [],
+              segments: [{ segmentId: '1', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
+            }
+          };
+        }
+      }
+    });
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/111');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/222');
+    expect(read.sort()).toEqual([10, 20]);
+    expect(document.querySelector('.summary-net').textContent).toBe('+0:10');
+  });
+});
+
+describe('recent comparisons', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const select = () => document.getElementById('recentSelect');
+  let store;
+  let read;
+
+  const open = async (saved = {}) => {
+    store = { ...saved };
+    read = [];
+    await loadPopup({
+      storage: storageWith(store),
+      tabs: {
+        ...stubChrome().tabs,
+        query: async () => [
+          { id: 1, url: 'https://www.strava.com/activities/1' },
+          { id: 2, url: 'https://www.strava.com/activities/2' },
+          { id: 3, url: 'https://www.strava.com/activities/3' }
+        ],
+        sendMessage: async (tabId, request) => {
+          if (request.action === 'ping') return { ok: true };
+          read.push(tabId);
+          return {
+            ok: true,
+            data: {
+              title: `Ride ${tabId} | Ride | Strava`,
+              athleteName: 'Ada',
+              activityStats: [],
+              segments: [{ segmentId: '1', occurrence: 0, name: 'Climb', time: `5:0${tabId}` }]
+            }
+          };
+        }
+      }
+    });
+    await settle();
+  };
+
+  it('is hidden until something has been compared', async () => {
+    await open();
+    expect(select().classList.contains('hidden')).toBe(true);
+  });
+
+  it('remembers a comparison, naming two of your own rides by their titles', async () => {
+    await open();
+    document.getElementById('activity1').value = 'https://www.strava.com/activities/1';
+    document.getElementById('activity2').value = 'https://www.strava.com/activities/2';
+    await compareActivities();
+
+    expect(store.recentComparisons).toHaveLength(1);
+    expect(store.recentComparisons[0]).toMatchObject({
+      activity1Id: '1',
+      activity2Id: '2',
+      label1: 'Ride 1',
+      label2: 'Ride 2',
+      netSeconds: 1
+    });
+    expect(select().classList.contains('hidden')).toBe(false);
+    expect(select().options[1].textContent).toMatch(/^Ride 1 vs Ride 2 · \+0:01 · /);
+  });
+
+  it('compares a pair from the list again', async () => {
+    await open({
+      recentComparisons: [{ activity1Id: '3', activity2Id: '1', label1: 'Ride 3', label2: 'Ride 1', netSeconds: -2 }]
+    });
+
+    select().value = '0';
+    select().dispatchEvent(new Event('change'));
+    await settle();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/3');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/1');
+    expect(read.sort()).toEqual([1, 3]);
+    // Back on the heading, ready for the next pick.
+    expect(select().value).toBe('');
+  });
+
+  it('does nothing when the heading is chosen', async () => {
+    await open({
+      recentComparisons: [{ activity1Id: '3', activity2Id: '1', label1: 'Ride 3', label2: 'Ride 1' }]
+    });
+
+    select().value = '';
+    select().dispatchEvent(new Event('change'));
+    await settle();
+
+    expect(read).toEqual([]);
+  });
+
+  it('shows a hostile title as text', async () => {
+    await open({
+      recentComparisons: [{ activity1Id: '3', activity2Id: '1', label1: '<b>x</b>', label2: 'Ride 1' }]
+    });
+    expect(select().options[1].textContent).toContain('<b>x</b>');
+    expect(select().querySelector('b')).toBeNull();
+  });
+});
+
+describe('your PRs added up', () => {
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  it('says in the summary how far activity 1 was from the sum of your PRs', async () => {
+    const matched = [
+      row({ time_1: '5:10', pr_time: '5:00', pr_time_seconds: 300 }),
+      row({ name: 'Kings Mountain', time_1: '2:00', pr_time: '1:55', pr_time_seconds: 115 })
+    ];
+    await loadPopup({
+      storage: storageWith({ athlete1Name: 'Ada', athlete2Name: 'Grace', comparisonResults: { matched } })
+    });
+    await settle();
+
+    expect(document.querySelector('.summary-pr-total').textContent).toBe(
+      'Your PRs on these 2 segments add up to 6:55; Ada took 7:10 (+0:15 vs your PRs)'
+    );
+  });
+
+  it('says nothing before Compare vs my PRs', async () => {
+    await loadPopup({ storage: storageWith({ comparisonResults: { matched: [row()] } }) });
+    await settle();
+    expect(document.querySelector('.summary-pr-total')).toBeNull();
+  });
+});
+
+describe('copying the summary as an image', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+  let drawn;
+  let written;
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
+  const realToBlob = HTMLCanvasElement.prototype.toBlob;
+
+  beforeEach(async () => {
+    drawn = [];
+    written = [];
+    HTMLCanvasElement.prototype.getContext = () => ({
+      scale: () => {},
+      fillRect: () => {},
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      stroke: () => {},
+      setLineDash: () => {},
+      measureText: text => ({ width: text.length * 7 }),
+      fillText: text => drawn.push(text)
+    });
+    HTMLCanvasElement.prototype.toBlob = function toBlob(done) {
+      done({ type: 'image/png', size: this.width * this.height });
+    };
+    globalThis.ClipboardItem = class {
+      constructor(items) {
+        this.items = items;
+      }
+    };
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { write: async items => written.push(...items) },
+      configurable: true
+    });
+
+    await loadPopup({
+      storage: storageWith({
+        athlete1Name: 'Ada',
+        athlete2Name: 'Grace',
+        comparisonResults: {
+          matched: [
+            row({ name: 'Kings Mountain', time_diff: '+0:42', time_diff_seconds: 42 }),
+            row({ name: 'Page Mill', time_diff: '-0:10', time_diff_seconds: -10 })
+          ]
+        }
+      })
+    });
+    await settle();
+  });
+
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = realGetContext;
+    HTMLCanvasElement.prototype.toBlob = realToBlob;
+  });
+
+  it('copies a PNG that says what the summary panel says', async () => {
+    document.getElementById('imageBtn').click();
+    await settle();
+
+    expect(written).toHaveLength(1);
+    expect(written[0].items['image/png'].type).toBe('image/png');
+    expect(drawn).toContain('+0:32');
+    expect(drawn).toContain('Grace slower than Ada across 2 matched segments');
+    expect(drawn.some(text => text.startsWith('Biggest losses:') && text.includes('Kings Mountain +0:42'))).toBe(true);
+    expect(drawn.some(text => text.startsWith('Biggest gains:') && text.includes('Page Mill -0:10'))).toBe(true);
+    expect(status().textContent).toContain('Summary image copied');
+  });
+
+  it('downloads the image when the clipboard refuses it', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        write: async () => {
+          throw new Error('Document is not focused');
+        }
+      },
+      configurable: true
+    });
+    const downloads = [];
+    globalThis.URL.createObjectURL = () => 'blob:stub';
+    globalThis.URL.revokeObjectURL = () => {};
+    HTMLAnchorElement.prototype.click = function click() {
+      downloads.push(this.download);
+    };
+
+    document.getElementById('imageBtn').click();
+    await settle();
+
+    expect(downloads).toEqual(['strava_segment_comparison.png']);
+    expect(status().textContent).toContain('downloaded instead');
+  });
+
+  it('cuts a line short rather than letting it run off the card', async () => {
+    expect(fitText({ measureText: text => ({ width: text.length * 10 }) }, 'a'.repeat(100), 200)).toHaveLength(20);
+  });
+});

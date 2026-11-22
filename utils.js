@@ -593,7 +593,8 @@ function summarizeComparison(matched, options = {}) {
  * activity 1, so activity 2 is the subject, as on screen.
  *
  * @param {object} summary  from summarizeComparison
- * @param {{excludeNested?: boolean}} options  as the summary was made
+ * @param {{excludeNested?: boolean, prTotals?: object}} options  as the summary was
+ *   made, and the PR totals to add when the PR columns are showing
  * @returns {string} empty when nothing could be compared
  */
 function summaryText(summary, name1, name2, options = {}) {
@@ -612,6 +613,7 @@ function summaryText(summary, name1, name2, options = {}) {
   ];
   if (summary.biggestLosses.length) lines.push(`Biggest losses: ${list(summary.biggestLosses)}`);
   if (summary.biggestGains.length) lines.push(`Biggest gains: ${list(summary.biggestGains)}`);
+  if (options.prTotals) lines.push(personalRecordTotalsText(options.prTotals, name1));
   if (options.excludeNested && summary.nestedCount) {
     lines.push(`Leaving out ${summary.nestedCount} segment${summary.nestedCount === 1 ? '' : 's'} inside another`);
   }
@@ -923,6 +925,86 @@ function pickActivityTabPair(tabs, currentWindowId = null) {
     .sort((a, b) => a.id - b.id);
 }
 
+/* ------------------------------------------------------------------ *
+ * Your PRs, added up
+ * ------------------------------------------------------------------ */
+
+/**
+ * Activity 1's time on the segments with a known PR, against the sum of those
+ * PRs: how far this ride was from your best ride of these segments.
+ *
+ * Only rows with both a PR and a time count, on both sides, so a segment with
+ * no PR never makes the gap look smaller than it is. Leaving nested segments
+ * out works as it does for the net: no stretch of road counted twice.
+ *
+ * @returns {{count: number, prSeconds: number, timeSeconds: number, offSeconds: number}|null}
+ *   null when no row has both
+ */
+function personalRecordTotals(matched, options = {}) {
+  const rows = (matched || []).filter(
+    row =>
+      typeof row.pr_time_seconds === 'number' &&
+      parseTimeToSeconds(row.time_1) !== null &&
+      !(options.excludeNested && row.nestedIn)
+  );
+  if (!rows.length) return null;
+
+  const prSeconds = rows.reduce((sum, row) => sum + row.pr_time_seconds, 0);
+  const timeSeconds = rows.reduce((sum, row) => sum + parseTimeToSeconds(row.time_1), 0);
+  return { count: rows.length, prSeconds, timeSeconds, offSeconds: timeSeconds - prSeconds };
+}
+
+/** The totals as one sentence, for the summary panel and the copied text. */
+function personalRecordTotalsText(totals, name1) {
+  if (!totals) return '';
+  return (
+    `Your PRs on these ${totals.count} segment${totals.count === 1 ? '' : 's'} add up to ` +
+    `${formatSecondsToTime(totals.prSeconds)}; ${name1} took ${formatSecondsToTime(totals.timeSeconds)} ` +
+    `(${formatTimeDiff(totals.offSeconds)} vs your PRs)`
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Recent comparisons
+ * ------------------------------------------------------------------ */
+
+const RECENT_COMPARISONS_LIMIT = 10;
+
+/**
+ * Put a comparison at the front of the recent list.
+ *
+ * A pair compared again moves to the front rather than appearing twice. The
+ * order of the pair matters — 1 vs 2 and 2 vs 1 read opposite ways — so the
+ * two are different entries.
+ */
+function rememberComparison(list, entry, limit = RECENT_COMPARISONS_LIMIT) {
+  const same = other =>
+    other && other.activity1Id === entry.activity1Id && other.activity2Id === entry.activity2Id;
+  return [entry, ...(list || []).filter(other => !same(other))].slice(0, limit);
+}
+
+/**
+ * An activity's own name from its page title, "Morning Ride | Ride | Strava"
+ * -> "Morning Ride". Null when there is nothing but the site name.
+ */
+function activityTitle(title) {
+  const first = String(title || '').split(' | ')[0].replace(/\s+/g, ' ').trim();
+  if (!first || /^strava$/i.test(first)) return null;
+  return first.length > 40 ? `${first.slice(0, 39)}…` : first;
+}
+
+/**
+ * The comparison a link asked for, from `?compare=111,222`: what the button on
+ * Strava's pages and the right-click menu open. Null unless it names two
+ * different activity ids.
+ */
+function requestedComparison(search) {
+  const value = new URLSearchParams(search || '').get('compare') || '';
+  const match = /^(\d+),(\d+)$/.exec(value);
+  if (!match || match[1] === match[2]) return null;
+  return { activity1Id: match[1], activity2Id: match[2] };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     KM_PER_MILE,
@@ -964,6 +1046,11 @@ if (typeof module !== 'undefined' && module.exports) {
     applyEffortHistory,
     hasEffortHistory,
     rankSharedActivities,
-    pickActivityTabPair
+    pickActivityTabPair,
+    personalRecordTotals,
+    personalRecordTotalsText,
+    rememberComparison,
+    activityTitle,
+    requestedComparison
   };
 }

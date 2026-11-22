@@ -15,7 +15,8 @@ const STORAGE_KEYS = [
   'athlete1Name',
   'athlete2Name',
   'comparisonResults',
-  'showAllColumns'
+  'showAllColumns',
+  'recentComparisons'
 ];
 
 // DOM Elements
@@ -41,6 +42,8 @@ const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
 const versionSpan = document.getElementById('version');
 const columnsToggle = document.getElementById('columnsToggle');
+const imageBtn = document.getElementById('imageBtn');
+const recentSelect = document.getElementById('recentSelect');
 
 let logEntries = [];
 
@@ -88,6 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
   swapBtn.addEventListener('click', swapActivities);
   exportBtn.addEventListener('click', exportAsCSV);
   copyBtn.addEventListener('click', copySummary);
+  imageBtn.addEventListener('click', copySummaryImage);
+  recentSelect.addEventListener('change', compareRecent);
   prBtn.addEventListener('click', loadPersonalRecords);
   refreshPrBtn.addEventListener('click', refreshPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
@@ -139,6 +144,19 @@ async function restoreState() {
       displayStatsComparison(lastStats.stats1, lastStats.stats2);
     }
     resultsDiv.classList.remove('hidden');
+  }
+
+  renderRecentComparisons(data[RECENT_COMPARISONS_KEY]);
+
+  // A link from the button on Strava's pages or the right-click menu names
+  // the two to compare, which beats both the saved fields and the open tabs.
+  const requested = requestedComparison(window.location.search);
+  if (requested) {
+    activity1Input.value = activityUrl(requested.activity1Id);
+    activity2Input.value = activityUrl(requested.activity2Id);
+    addLogEntry('Comparing the two activities picked on Strava', 'info');
+    await compareActivities();
+    return;
   }
 
   // Open tabs win over saved URLs: open two rides, click the icon, click
@@ -229,6 +247,10 @@ const ACTIVITY_URL_RE = /^https:\/\/www\.strava\.com\/activities\/\d+/;
 
 function isValidStravaActivityUrl(url) {
   return ACTIVITY_URL_RE.test(url || '');
+}
+
+function activityUrl(activityId) {
+  return `https://www.strava.com/activities/${activityId}`;
 }
 
 function extractActivityIdFromUrl(url) {
@@ -562,7 +584,7 @@ async function runExclusive(task) {
 function setRunControlsDisabled(disabled) {
   const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
   // Clear too: clearing under a run would only be undone when it finishes.
-  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, ...suggestions].forEach(button => {
+  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, recentSelect, ...suggestions].forEach(button => {
     button.disabled = disabled;
   });
 }
@@ -631,6 +653,7 @@ async function readAndCompare() {
     resultsDiv.classList.remove('hidden');
 
     await saveComparison();
+    if (comparison.matched.length) await rememberRecent(activity1Data, activity2Data);
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
   }
@@ -720,6 +743,78 @@ function saveComparison() {
       stats2: lastStats.stats2
     }
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Recent comparisons
+ *
+ * The pairs, not the results: picking one compares it again, which re-reads
+ * both activities. A saved table goes stale the moment a PR is set or an
+ * activity is edited, and ten of them would be most of the storage this
+ * extension uses.
+ * ------------------------------------------------------------------ */
+
+const RECENT_COMPARISONS_KEY = 'recentComparisons';
+let recentComparisons = [];
+
+/**
+ * How one side of a comparison is named in the list: the athlete when the two
+ * are different people, otherwise the activity's own name, since "Activity 1
+ * vs Activity 2" would describe every entry alike.
+ */
+function recentSideLabel(index, data, activityId) {
+  const name = getDisplayName(index);
+  if (name !== `Activity ${index}`) return name;
+  return activityTitle(data.title) || `Activity ${activityId}`;
+}
+
+async function rememberRecent(activity1Data, activity2Data) {
+  const entry = {
+    activity1Id: comparedIds.activity1,
+    activity2Id: comparedIds.activity2,
+    label1: recentSideLabel(1, activity1Data, comparedIds.activity1),
+    label2: recentSideLabel(2, activity2Data, comparedIds.activity2),
+    netSeconds: summarizeComparison(comparison.matched).netSeconds,
+    comparedAt: Date.now()
+  };
+
+  const data = await chrome.storage.local.get(RECENT_COMPARISONS_KEY);
+  const list = rememberComparison(data[RECENT_COMPARISONS_KEY], entry);
+  await chrome.storage.local.set({ [RECENT_COMPARISONS_KEY]: list });
+  renderRecentComparisons(list);
+}
+
+function recentOptionText(entry) {
+  const parts = [`${entry.label1} vs ${entry.label2}`];
+  if (typeof entry.netSeconds === 'number') parts.push(formatTimeDiff(entry.netSeconds));
+  if (entry.comparedAt) {
+    parts.push(new Date(entry.comparedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  }
+  return parts.join(' · ');
+}
+
+function renderRecentComparisons(list) {
+  recentComparisons = Array.isArray(list) ? list : [];
+  recentSelect.classList.toggle('hidden', !recentComparisons.length);
+
+  // new Option() sets text, never markup: labels come from page titles.
+  const options = [new Option(`Recent comparisons (${recentComparisons.length})`, '')];
+  recentComparisons.forEach((entry, index) => options.push(new Option(recentOptionText(entry), String(index))));
+  recentSelect.replaceChildren(...options);
+}
+
+/** Compare a pair from the list again. */
+function compareRecent() {
+  const value = recentSelect.value;
+  // Back to the heading, so picking the same pair again is a change too.
+  recentSelect.value = '';
+  // The heading's value is '', which Number() would read as the first entry.
+  const entry = value === '' ? null : recentComparisons[Number(value)];
+  if (!entry) return;
+
+  activity1Input.value = activityUrl(entry.activity1Id);
+  activity2Input.value = activityUrl(entry.activity2Id);
+  return compareActivities();
 }
 
 /* ------------------------------------------------------------------ *
@@ -1852,6 +1947,14 @@ function renderSummary(data) {
   const gains = summaryRow('Biggest gains', summary.biggestGains);
   if (gains) panel.appendChild(gains);
 
+  const prTotals = summaryPrTotals(data.matched);
+  if (prTotals) {
+    const line = document.createElement('div');
+    line.className = 'summary-pr-total';
+    line.textContent = personalRecordTotalsText(prTotals, getDisplayName(1));
+    panel.appendChild(line);
+  }
+
   const note = document.createElement('div');
   note.className = 'summary-note';
   note.textContent =
@@ -1863,6 +1966,14 @@ function renderSummary(data) {
   panel.appendChild(note);
 
   container.appendChild(panel);
+}
+
+/**
+ * Your PRs added up, once "Compare vs my PRs" has filled them in. Follows the
+ * nested-segments choice like the net does.
+ */
+function summaryPrTotals(matched) {
+  return hasPersonalRecords(matched) ? personalRecordTotals(matched, { excludeNested }) : null;
 }
 
 /** Segments present in only one activity, so they are not silently dropped. */
@@ -2030,17 +2141,22 @@ function exportAsCSV() {
   });
 
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  downloadBlob(blob, 'strava_segment_comparison.csv', () => addLogEntry('CSV export completed', 'success'));
+}
+
+/** Hand `blob` to the browser as a download named `filename`. */
+function downloadBlob(blob, filename, onDone) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'strava_segment_comparison.csv';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
 
   setTimeout(() => {
     URL.revokeObjectURL(url);
-    addLogEntry('CSV export completed', 'success');
+    if (onDone) onDone();
   }, 100);
 }
 
@@ -2052,7 +2168,10 @@ function exportAsCSV() {
  */
 async function copySummary() {
   const summary = summarizeComparison(comparison.matched, { excludeNested });
-  const text = summaryText(summary, getDisplayName(1), getDisplayName(2), { excludeNested });
+  const text = summaryText(summary, getDisplayName(1), getDisplayName(2), {
+    excludeNested,
+    prTotals: summaryPrTotals(comparison.matched)
+  });
   if (!text) {
     showStatus('Nothing to copy yet — compare two activities first', 'error');
     return;
@@ -2063,6 +2182,185 @@ async function copySummary() {
     showStatus('Summary copied to the clipboard', 'success');
   } catch (error) {
     showStatus(`Could not copy the summary: ${error.message}`, 'error');
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * The summary as an image
+ *
+ * The same reading as the panel — the net, the counts, where the gap opened
+ * up, the biggest losses and gains — drawn on a canvas, for a chat or a club
+ * thread where a table will not paste. Drawn directly rather than by
+ * screenshotting the page, so it looks the same however the popup is sized,
+ * and needs no library.
+ * ------------------------------------------------------------------ */
+
+const CARD_WIDTH = 640;
+// Drawn at twice the size, so it stays sharp on a high-density screen.
+const CARD_SCALE = 2;
+const CARD_PADDING = 24;
+const CARD_CHART_HEIGHT = 96;
+const CARD_COLORS = {
+  background: '#ffffff',
+  accent: '#fc4c02',
+  text: '#111827',
+  muted: '#6b7280',
+  loss: '#dc2626',
+  gain: '#16a34a',
+  zero: '#9ca3af'
+};
+
+/** What the card says, decided apart from how it is drawn. */
+function summaryCardModel(summary) {
+  const slower = summary.netSeconds > 0;
+  const direction = summary.netSeconds === 0 ? 'level with' : slower ? 'slower than' : 'faster than';
+  const charted = excludeNested ? comparison.matched.filter(row => !row.nestedIn) : comparison.matched;
+  const list = rows => rows.map(row => `${row.name} ${row.time_diff}`).join('  ·  ');
+  const prTotals = summaryPrTotals(comparison.matched);
+
+  return {
+    netText: summary.netText,
+    netColor: summary.netSeconds === 0 ? CARD_COLORS.text : slower ? CARD_COLORS.loss : CARD_COLORS.gain,
+    caption:
+      `${getDisplayName(2)} ${direction} ${getDisplayName(1)} across ` +
+      `${summary.compared} matched segment${summary.compared === 1 ? '' : 's'}`,
+    counts:
+      `Faster on ${summary.fasterCount}, slower on ${summary.slowerCount}` +
+      (summary.evenCount ? `, level on ${summary.evenCount}` : '') +
+      (excludeNested && summary.nestedCount ? ` · ${summary.nestedCount} nested left out` : ''),
+    points: cumulativeTimeDeltas(charted),
+    chartCaption: `Running total along the course · above the line, ${getDisplayName(2)} is behind`,
+    losses: summary.biggestLosses.length ? `Biggest losses:  ${list(summary.biggestLosses)}` : null,
+    gains: summary.biggestGains.length ? `Biggest gains:  ${list(summary.biggestGains)}` : null,
+    prLine: prTotals ? personalRecordTotalsText(prTotals, getDisplayName(1)) : null,
+    footer: `Strava Segment Comparator · ${new Date().toLocaleDateString()}`
+  };
+}
+
+/** Each line of the card in order, with the room it takes. */
+function summaryCardRows(model) {
+  return [
+    { kind: 'net', height: 44 },
+    { kind: 'caption', height: 24 },
+    { kind: 'counts', height: 24 },
+    model.points.length >= 2 ? { kind: 'chart', height: CARD_CHART_HEIGHT + 12 } : null,
+    model.points.length >= 2 ? { kind: 'chartCaption', height: 26 } : null,
+    model.losses ? { kind: 'losses', height: 24 } : null,
+    model.gains ? { kind: 'gains', height: 24 } : null,
+    model.prLine ? { kind: 'prLine', height: 24 } : null,
+    { kind: 'footer', height: 32 }
+  ].filter(Boolean);
+}
+
+function summaryCardHeight(model) {
+  return CARD_PADDING * 2 + summaryCardRows(model).reduce((sum, row) => sum + row.height, 0);
+}
+
+/** `text`, cut short with an ellipsis if it would run past `maxWidth`. */
+function fitText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}…`;
+}
+
+function drawCardChart(ctx, points, top, width) {
+  const values = points.map(point => point.cumulative);
+  const high = Math.max(0, ...values);
+  const low = Math.min(0, ...values);
+  const span = high - low || 1;
+  const y = value => top + (CARD_CHART_HEIGHT * (high - value)) / span;
+  const slot = width / points.length;
+  const barWidth = Math.max(1, slot - Math.min(4, slot * 0.25));
+  const zero = y(0);
+
+  values.forEach((value, index) => {
+    ctx.fillStyle = value > 0 ? CARD_COLORS.loss : CARD_COLORS.gain;
+    const barTop = value > 0 ? y(value) : zero;
+    ctx.fillRect(CARD_PADDING + index * slot, barTop, barWidth, Math.max(1, Math.abs(y(value) - zero)));
+  });
+
+  ctx.strokeStyle = CARD_COLORS.zero;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(CARD_PADDING, zero);
+  ctx.lineTo(CARD_PADDING + width, zero);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/** Draw the card on `ctx`, in card units (the caller scales for sharpness). */
+function drawSummaryCard(ctx, model) {
+  const height = summaryCardHeight(model);
+  const width = CARD_WIDTH - CARD_PADDING * 2;
+  const font = (weight, size) => `${weight} ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+
+  ctx.fillStyle = CARD_COLORS.background;
+  ctx.fillRect(0, 0, CARD_WIDTH, height);
+  ctx.fillStyle = CARD_COLORS.accent;
+  ctx.fillRect(0, 0, CARD_WIDTH, 5);
+  ctx.textBaseline = 'top';
+
+  const text = (value, weight, size, color, top) => {
+    ctx.font = font(weight, size);
+    ctx.fillStyle = color;
+    ctx.fillText(fitText(ctx, value, width), CARD_PADDING, top);
+  };
+
+  let top = CARD_PADDING;
+  summaryCardRows(model).forEach(row => {
+    switch (row.kind) {
+      case 'net': text(model.netText, 700, 34, model.netColor, top); break;
+      case 'caption': text(model.caption, 600, 15, CARD_COLORS.text, top); break;
+      case 'counts': text(model.counts, 400, 13, CARD_COLORS.muted, top); break;
+      case 'chart': drawCardChart(ctx, model.points, top + 4, width); break;
+      case 'chartCaption': text(model.chartCaption, 400, 11, CARD_COLORS.muted, top + 2); break;
+      case 'losses': text(model.losses, 600, 13, CARD_COLORS.loss, top); break;
+      case 'gains': text(model.gains, 600, 13, CARD_COLORS.gain, top); break;
+      case 'prLine': text(model.prLine, 400, 13, CARD_COLORS.text, top); break;
+      case 'footer': text(model.footer, 400, 11, CARD_COLORS.muted, top + 12); break;
+    }
+    top += row.height;
+  });
+}
+
+/**
+ * Copy the summary to the clipboard as a PNG. If the clipboard refuses — the
+ * popup lost focus, or a browser without image support — it is downloaded
+ * instead, so the click is never wasted.
+ */
+async function copySummaryImage() {
+  const summary = summarizeComparison(comparison.matched, { excludeNested });
+  if (!summary.compared) {
+    showStatus('Nothing to share yet — compare two activities first', 'error');
+    return;
+  }
+
+  const model = summaryCardModel(summary);
+  const canvas = document.createElement('canvas');
+  canvas.width = CARD_WIDTH * CARD_SCALE;
+  canvas.height = summaryCardHeight(model) * CARD_SCALE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    showStatus('Could not draw the image in this browser', 'error');
+    return;
+  }
+  ctx.scale(CARD_SCALE, CARD_SCALE);
+  drawSummaryCard(ctx, model);
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) {
+    showStatus('Could not draw the image in this browser', 'error');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    showStatus('Summary image copied — paste it into a chat', 'success');
+  } catch (error) {
+    downloadBlob(blob, 'strava_segment_comparison.png');
+    showStatus(`Could not copy the image (${error.message}), so it was downloaded instead`, 'info');
   }
 }
 

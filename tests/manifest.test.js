@@ -10,8 +10,14 @@ const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 describe('manifest permissions', () => {
-  it('asks for storage and nothing else', () => {
-    expect(manifest.permissions).toEqual(['storage']);
+  it('asks for storage and the right-click menu, and nothing else', () => {
+    // Neither shows a warning at install.
+    expect(manifest.permissions).toEqual(['storage', 'contextMenus']);
+  });
+
+  it('puts the Compare button on activity pages only', () => {
+    const button = manifest.content_scripts.find(entry => entry.js.includes('page-button.js'));
+    expect(button.matches).toEqual(['https://www.strava.com/activities/*']);
   });
 
   it('does not ask for the tabs permission', () => {

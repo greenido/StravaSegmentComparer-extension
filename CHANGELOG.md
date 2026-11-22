@@ -4,6 +4,19 @@
 
 ### 🆕 Improvements
 
+- **Compare from Strava's own pages**: a "⇄ Compare…" button in the corner of
+  every activity page. Click it on one activity, then on another, and the
+  comparison opens in a tab with the first pick as activity 1. Right-clicking
+  an activity link or page does the same, and the toolbar badge shows a pick
+  is waiting. Adds the `contextMenus` permission, which shows no warning
+- **Copy as image**: the summary — net gap, counts, where the gap opened up,
+  biggest losses and gains — as a PNG on your clipboard, for a chat or club
+  thread. Downloaded instead if the clipboard refuses it
+- **Your PRs added up**: after "Compare vs my PRs", the summary says what your
+  PRs on these segments add up to and how far activity 1 was from that. Also in
+  the copied summary and the image
+- **Recent comparisons**: the last ten pairs in a dropdown under the buttons;
+  pick one to compare it again
 - **A table that fits the popup**: the popup shows the times and the gaps —
   segment, both times, Time Diff, Time Diff % and Speed/Pace Diff. "Show all
   columns" adds the rest (speeds, power, heart rate, Form, VAM, PRs and your
