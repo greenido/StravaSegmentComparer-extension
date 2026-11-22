@@ -17,8 +17,9 @@ If you have questions or issues, please open an issue on GitHub.
 - **Summary strip**: The net gap, the win/loss count, and the biggest losses and gains by name, above the table
 - **Swap activities**: One click swaps activity 1 and 2. A comparison on screen is redone the other way round
 - **Sortable columns**: Click a header to sort; click again to reverse
-- **Filter by name**: Narrow a long ride to the segments you care about; the export follows what is shown
-- **Open in tab**: Take the comparison out of the popup into a full-width tab, no refetching
+- **Filter by name**: Narrow a long ride to the segments you care about; the export keeps the same rows
+- **Core columns first**: The popup shows the times and the gaps; “Show all columns” adds speeds, power, heart rate, Form, VAM and PRs, and is remembered
+- **Open in tab**: Take the comparison out of the popup into a full-width tab, no refetching. The tab always shows every column
 - **Rides and runs**: Compares speed for rides and pace for runs, and normalizes across km/h vs mph and /km vs /mi. Runs no longer need to be open in a tab
 - **Power and heart rate**: Average power and heart rate per segment and their deltas, each shown when either activity recorded it
 - **VAM**: Metres climbed per hour on segments averaging 3% or steeper, and the delta
@@ -39,6 +40,16 @@ If you have questions or issues, please open an issue on GitHub.
 
 The comparison table is a plain, readable table, sortable by any column, with
 time and speed/pace deltas shown as both a colour and an arrow.
+
+### Columns
+
+The popup is at most 800px wide, so it shows six columns: the segment, both
+times, Time Diff, Time Diff % and the Speed (or Pace) Diff. “Show all columns”
+above the table adds everything else the activities have data for — both
+speeds, power, heart rate, Form, VAM, and after “Compare vs my PRs” the PR and
+history columns — and the popup remembers that choice. Putting a column away
+that the table is sorted by returns it to course order. “Open in tab” always
+shows every column.
 
 ## Install (Load Unpacked)
 
@@ -177,8 +188,8 @@ Some caveats worth knowing:
 ### Export
 
 Click “Export CSV” to download a CSV with headers that include the detected
-athlete names. It contains exactly the columns the table is showing, in the
-sort order you left it in.
+athlete names. It contains every column the comparison has data for, whether
+or not the popup is showing it, in the sort order and filter you left it in.
 
 ### Status coloring
 
