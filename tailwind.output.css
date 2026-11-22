@@ -425,6 +425,36 @@ body.view-tab #segmentsTable {
   line-height: 1.125rem;
 }
 
+/* Recent comparisons: a small dropdown under the buttons. */
+.recent-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.recent-select {
+  max-width: 100%;
+  font-size: 0.75rem;
+  color: #374151;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.recent-select:focus-visible {
+  outline: 2px solid #fc4c02;
+  outline-offset: 1px;
+}
+
+/* The sum of your PRs, under the biggest gains and losses. */
+.summary-pr-total {
+  font-size: 0.75rem;
+  color: #374151;
+  margin-top: 0.375rem;
+}
+
 /* Show all columns / Show fewer: a quiet text button above the table. */
 .columns-toggle-row {
   display: flex;

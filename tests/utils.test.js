@@ -33,7 +33,12 @@ import {
   timeDiffPercent,
   formatPercentDiff,
   summaryText,
-  pickActivityTabPair
+  pickActivityTabPair,
+  personalRecordTotals,
+  personalRecordTotalsText,
+  rememberComparison,
+  activityTitle,
+  requestedComparison
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -998,5 +1003,107 @@ describe('pickActivityTabPair', () => {
     expect(ids(pickActivityTabPair([tab(10)]))).toEqual([10]);
     expect(pickActivityTabPair([])).toEqual([]);
     expect(pickActivityTabPair(null)).toEqual([]);
+  });
+});
+
+describe('personalRecordTotals', () => {
+  const pr = (time_1, pr_time_seconds, extra = {}) => ({ time_1, pr_time_seconds, ...extra });
+
+  it('adds up activity 1 against the sum of your PRs', () => {
+    expect(personalRecordTotals([pr('5:10', 300), pr('2:00', 115)])).toEqual({
+      count: 2,
+      prSeconds: 415,
+      timeSeconds: 430,
+      offSeconds: 15
+    });
+  });
+
+  it('counts only segments with both a PR and a time, on both sides', () => {
+    const totals = personalRecordTotals([pr('5:10', 300), pr('2:00', null), pr('N/A', 100)]);
+    expect(totals).toEqual({ count: 1, prSeconds: 300, timeSeconds: 310, offSeconds: 10 });
+  });
+
+  it('leaves nested segments out when asked, like the net', () => {
+    const rows = [pr('5:10', 300), pr('1:00', 55, { nestedIn: 'Lap' })];
+    expect(personalRecordTotals(rows).count).toBe(2);
+    expect(personalRecordTotals(rows, { excludeNested: true }).count).toBe(1);
+  });
+
+  it('is null when there is nothing to add up', () => {
+    expect(personalRecordTotals([pr('5:10', null)])).toBeNull();
+    expect(personalRecordTotals(null)).toBeNull();
+  });
+
+  it('reads as one sentence', () => {
+    expect(personalRecordTotalsText({ count: 2, prSeconds: 415, timeSeconds: 430, offSeconds: 15 }, 'Ada')).toBe(
+      'Your PRs on these 2 segments add up to 6:55; Ada took 7:10 (+0:15 vs your PRs)'
+    );
+    expect(personalRecordTotalsText(null, 'Ada')).toBe('');
+  });
+
+  it('goes into the copied summary when given', () => {
+    const summary = summarizeComparison([{ name: 'Climb', time_diff: '+0:10', time_diff_seconds: 10 }]);
+    const totals = { count: 1, prSeconds: 300, timeSeconds: 310, offSeconds: 10 };
+    expect(summaryText(summary, 'Ada', 'Grace', { prTotals: totals })).toContain(
+      'Your PRs on these 1 segment add up to 5:00'
+    );
+    expect(summaryText(summary, 'Ada', 'Grace')).not.toContain('Your PRs');
+  });
+});
+
+describe('rememberComparison', () => {
+  const entry = (a, b, extra = {}) => ({ activity1Id: a, activity2Id: b, ...extra });
+
+  it('puts the newest first', () => {
+    expect(rememberComparison([entry('1', '2')], entry('3', '4'))).toEqual([entry('3', '4'), entry('1', '2')]);
+  });
+
+  it('moves a pair compared again to the front instead of listing it twice', () => {
+    const list = [entry('3', '4'), entry('1', '2', { netSeconds: 5 })];
+    expect(rememberComparison(list, entry('1', '2', { netSeconds: 9 }))).toEqual([
+      entry('1', '2', { netSeconds: 9 }),
+      entry('3', '4')
+    ]);
+  });
+
+  it('keeps 2 vs 1 apart from 1 vs 2, since they read opposite ways', () => {
+    expect(rememberComparison([entry('1', '2')], entry('2', '1'))).toHaveLength(2);
+  });
+
+  it('keeps ten', () => {
+    let list = [];
+    for (let i = 0; i < 15; i++) list = rememberComparison(list, entry(String(i), 'x'));
+    expect(list).toHaveLength(10);
+    expect(list[0].activity1Id).toBe('14');
+  });
+});
+
+describe('activityTitle', () => {
+  it("takes the activity's own name from the page title", () => {
+    expect(activityTitle('Morning Ride | Ride | Strava')).toBe('Morning Ride');
+  });
+
+  it('is null when there is nothing but the site', () => {
+    expect(activityTitle('Strava')).toBeNull();
+    expect(activityTitle('')).toBeNull();
+    expect(activityTitle(undefined)).toBeNull();
+  });
+
+  it('shortens a long name', () => {
+    expect(activityTitle(`${'a'.repeat(60)} | Ride | Strava`)).toHaveLength(40);
+  });
+});
+
+describe('requestedComparison', () => {
+  it('reads two activity ids from the link', () => {
+    expect(requestedComparison('?view=tab&compare=111,222')).toEqual({ activity1Id: '111', activity2Id: '222' });
+  });
+
+  it('ignores anything else', () => {
+    expect(requestedComparison('?view=tab')).toBeNull();
+    expect(requestedComparison('?compare=111')).toBeNull();
+    expect(requestedComparison('?compare=111,111')).toBeNull();
+    expect(requestedComparison('?compare=111,abc')).toBeNull();
+    expect(requestedComparison('')).toBeNull();
   });
 });
