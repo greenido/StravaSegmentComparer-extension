@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### 🔧 Fixes and internals
+
+- The URL fields and the table can no longer disagree in silence. Opening the
+  popup still fills the fields from your open tabs, but if they are not the
+  comparison restored underneath, the status line says so. ⇄ redoes a
+  comparison only when the fields were that comparison, instead of comparing a
+  different pair the other way round
+- Auto-Detect picks the tab you are looking at and the one you used before it,
+  instead of the two oldest activity tabs. Within the pair, the tab opened
+  first is still activity 1, so a two-tab comparison reads as it always did
+- The status line is announced to screen readers
+
 ## Version 2.11 - Polish
 
 ### 🔧 Fixes and internals

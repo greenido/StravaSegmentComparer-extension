@@ -1001,6 +1001,111 @@ describe('opening the popup', () => {
   });
 });
 
+describe('a restored comparison and the URL fields', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const status = () => document.getElementById('status');
+  const tab = id => ({ id, url: `https://www.strava.com/activities/${id}` });
+
+  // A popup opened with a comparison of 1 vs 2 already saved, and `tabs` open.
+  const openWith = async (tabs, saved = {}) => {
+    const store = {
+      athlete1Name: 'Ada',
+      athlete2Name: 'Grace',
+      comparisonResults: {
+        matched: [row()],
+        onlyIn1: [],
+        onlyIn2: [],
+        activity1Id: '1',
+        activity2Id: '2',
+        rateLabel: 'Speed',
+        ...saved
+      }
+    };
+    const storage = {
+      local: {
+        get: async keys => Object.fromEntries([].concat(keys).filter(k => k in store).map(k => [k, store[k]])),
+        set: async values => Object.assign(store, values),
+        remove: async keys => [].concat(keys).forEach(key => delete store[key])
+      }
+    };
+    let extracted = 0;
+    await loadPopup({
+      storage,
+      tabs: {
+        ...stubChrome().tabs,
+        query: async () => tabs,
+        sendMessage: async () => {
+          extracted += 1;
+          return { ok: true };
+        }
+      }
+    });
+    await settle();
+    return { extracted: () => extracted };
+  };
+
+  it('says so when the fields name other activities than the table', async () => {
+    await openWith([tab(3), tab(4)]);
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/3');
+    expect(status().classList.contains('hidden')).toBe(false);
+    expect(status().textContent).toContain('The table shows your last comparison (Ada vs Grace)');
+  });
+
+  it('stays quiet when the open tabs are the comparison on screen', async () => {
+    await openWith([tab(1), tab(2)]);
+    expect(status().classList.contains('hidden')).toBe(true);
+  });
+
+  it('stays quiet about a comparison saved before the ids were', async () => {
+    await openWith([tab(3), tab(4)], { activity1Id: undefined, activity2Id: undefined });
+    expect(status().classList.contains('hidden')).toBe(true);
+  });
+
+  it('does not redo a different pair than the one on screen when swapping', async () => {
+    const popup = await openWith([tab(3), tab(4)]);
+
+    document.getElementById('swapBtn').click();
+    await settle();
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/4');
+    expect(popup.extracted()).toBe(0);
+    expect(document.querySelectorAll('#segmentsTableBody tr')).toHaveLength(1);
+  });
+});
+
+describe('picking tabs on open', () => {
+  it('fills the fields with the tab in view and the one used before it', async () => {
+    await loadPopup({
+      windows: { getCurrent: async () => ({ id: 7 }) },
+      tabs: {
+        ...stubChrome().tabs,
+        query: async () => [
+          { id: 10, windowId: 7, lastAccessed: 100, url: 'https://www.strava.com/activities/10' },
+          { id: 20, windowId: 7, lastAccessed: 300, url: 'https://www.strava.com/activities/20' },
+          { id: 30, windowId: 7, lastAccessed: 50, active: true, url: 'https://www.strava.com/activities/30' }
+        ]
+      }
+    });
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/20');
+    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/30');
+  });
+});
+
+describe('the status line', () => {
+  it('is announced to screen readers', async () => {
+    await loadPopup();
+    const status = document.getElementById('status');
+
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
 describe('one run at a time', () => {
   let sent;
   let gate;

@@ -8,7 +8,7 @@ If you have questions or issues, please open an issue on GitHub.
 
 ## Features
 
-- **Auto-detect open Strava activity tabs**: Scans your open tabs and auto-fills the first two activity URLs. Opening the popup does this quietly; the Auto-Detect button also says what it found
+- **Auto-detect open Strava activity tabs**: Fills the URLs from your open activity tabs — the one you are looking at and the one you used before it, with the one opened first as activity 1. Opening the popup does this quietly; the Auto-Detect button also says what it found
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
 - **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort, and is closed again even if you close the popup first
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
@@ -34,7 +34,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **Athlete-aware headers**: Uses detected athlete names for table headers when available. When both activities are the same athlete's, they are labelled Activity 1 and Activity 2 instead
 - **Activity stats panels**: Shows a side-by-side comparison of key activity stats, read from the page where possible and from Strava's embedded activity data when the page yields nothing
 - **CSV export**: One-click export of the comparison table
-- **Persistent results**: The last comparison is auto-restored on popup open
+- **Persistent results**: The last comparison is auto-restored on popup open. If the URL fields then name other activities, the status line says the table is the earlier comparison
 - **Detailed logs**: Built-in activity log with statuses and errors; quick Clear button
 
 The comparison table is a plain, readable table, sortable by any column, with
@@ -67,8 +67,8 @@ Required permissions: `storage`, and host access to `https://www.strava.com/*` (
 
 Every delta is activity 2 minus activity 1, and the PR and history columns read
 activity 1's times, so which is which matters. The ⇄ button between the URL
-fields swaps them. If a comparison is showing, it is redone the other way round
-so the table matches the fields. That re-reads both activities, and any PR
+fields swaps them. If the comparison showing is of the two activities in the
+fields, it is redone the other way round so the table matches the fields. That re-reads both activities, and any PR
 columns need “Compare vs my PRs” again, which comes from the cache.
 
 ### My Activities Here

@@ -32,7 +32,8 @@ import {
   filterSegments,
   timeDiffPercent,
   formatPercentDiff,
-  summaryText
+  summaryText,
+  pickActivityTabPair
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -952,5 +953,50 @@ describe('filterSegments', () => {
   it('survives a row with no name and a filter that matches nothing', () => {
     expect(filterSegments(matched, 'zzz')).toEqual([]);
     expect(filterSegments(null, 'x')).toEqual([]);
+  });
+});
+
+describe('pickActivityTabPair', () => {
+  const tab = (id, extra = {}) => ({ id, url: `https://www.strava.com/activities/${id}`, ...extra });
+  const ids = tabs => tabs.map(t => t.id);
+
+  it('keeps the first two by opening order when nothing says otherwise', () => {
+    // Two tabs, no recency information: exactly what it did before.
+    expect(ids(pickActivityTabPair([tab(20), tab(10)]))).toEqual([10, 20]);
+    expect(ids(pickActivityTabPair([tab(30), tab(10), tab(20)]))).toEqual([10, 20]);
+  });
+
+  it('picks the two used most recently, not the two oldest', () => {
+    const tabs = [tab(10, { lastAccessed: 100 }), tab(20, { lastAccessed: 300 }), tab(30, { lastAccessed: 200 })];
+    expect(ids(pickActivityTabPair(tabs))).toEqual([20, 30]);
+  });
+
+  it('always includes the tab being looked at in this window', () => {
+    const tabs = [
+      tab(10, { lastAccessed: 300, windowId: 1 }),
+      tab(20, { lastAccessed: 200, windowId: 1 }),
+      tab(30, { lastAccessed: 50, windowId: 1, active: true })
+    ];
+    expect(ids(pickActivityTabPair(tabs, 1))).toEqual([10, 30]);
+  });
+
+  it('ignores the active tab of another window', () => {
+    const tabs = [
+      tab(10, { lastAccessed: 300, windowId: 1 }),
+      tab(20, { lastAccessed: 200, windowId: 1 }),
+      tab(30, { lastAccessed: 50, windowId: 2, active: true })
+    ];
+    expect(ids(pickActivityTabPair(tabs, 1))).toEqual([10, 20]);
+  });
+
+  it('orders the pair by opening order, so activity 1 is the older tab', () => {
+    const tabs = [tab(10, { lastAccessed: 100 }), tab(20, { lastAccessed: 300 })];
+    expect(ids(pickActivityTabPair(tabs))).toEqual([10, 20]);
+  });
+
+  it('copes with one tab or none', () => {
+    expect(ids(pickActivityTabPair([tab(10)]))).toEqual([10]);
+    expect(pickActivityTabPair([])).toEqual([]);
+    expect(pickActivityTabPair(null)).toEqual([]);
   });
 });
