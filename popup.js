@@ -16,7 +16,8 @@ const STORAGE_KEYS = [
   'athlete2Name',
   'comparisonResults',
   'showAllColumns',
-  'recentComparisons'
+  'recentComparisons',
+  'extraActivities'
 ];
 
 // DOM Elements
@@ -44,6 +45,8 @@ const versionSpan = document.getElementById('version');
 const columnsToggle = document.getElementById('columnsToggle');
 const imageBtn = document.getElementById('imageBtn');
 const recentSelect = document.getElementById('recentSelect');
+const extraActivitiesDiv = document.getElementById('extraActivities');
+const addActivityBtn = document.getElementById('addActivityBtn');
 
 let logEntries = [];
 
@@ -54,10 +57,10 @@ let athlete1Name = null;
 let athlete2Name = null;
 let rateLabel = 'Speed';
 
-// Which two activities the comparison on screen is of, as ids. The URL fields
-// can change underneath it — auto-detect on open, typing, a swap — so this is
-// what says whether they still describe the table. null when unknown: nothing
-// compared yet, or a comparison saved before the ids were.
+// Which activities the comparison on screen is of, as ids in field order. The
+// URL fields can change underneath it — auto-detect on open, typing, a swap —
+// so this is what says whether they still describe the table. null when
+// unknown: nothing compared yet, or a comparison saved before the ids were.
 let comparedIds = null;
 
 // null key means "activity 1 page order", which is course order and therefore
@@ -97,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshPrBtn.addEventListener('click', refreshPersonalRecords);
   autoDetectBtn.addEventListener('click', () => autoPopulateActivityUrls());
   myActivitiesBtn.addEventListener('click', findMyActivities);
+  addActivityBtn.addEventListener('click', () => addExtraActivityField().focus());
 
   helpBtn.addEventListener('click', e => {
     e.preventDefault();
@@ -128,16 +132,22 @@ async function restoreState() {
   if (data.athlete1Name) athlete1Name = data.athlete1Name;
   if (data.athlete2Name) athlete2Name = data.athlete2Name;
   showAllColumns = data[SHOW_ALL_COLUMNS_KEY] === true;
+  // From empty, so restoring twice never doubles the fields.
+  extraActivitiesDiv.replaceChildren();
+  (data[EXTRA_ACTIVITIES_KEY] || []).forEach(url => addExtraActivityField(url));
+  renumberExtraActivityFields();
 
   const saved = data.comparisonResults;
   if (saved && saved.matched) {
-    comparison = { matched: saved.matched, onlyIn1: saved.onlyIn1 || [], onlyIn2: saved.onlyIn2 || [] };
+    comparison = {
+      matched: saved.matched,
+      onlyIn1: saved.onlyIn1 || [],
+      onlyIn2: saved.onlyIn2 || [],
+      ...(Array.isArray(saved.athletes) ? { athletes: saved.athletes } : {})
+    };
     rateLabel = saved.rateLabel || 'Speed';
     lastStats = { stats1: saved.stats1 || [], stats2: saved.stats2 || [] };
-    comparedIds =
-      saved.activity1Id && saved.activity2Id
-        ? { activity1: saved.activity1Id, activity2: saved.activity2Id }
-        : null;
+    comparedIds = Array.isArray(saved.activityIds) ? saved.activityIds : null;
     addLogEntry('Restored the previous comparison', 'info');
     renderComparison(comparison);
     if (saved.stats1 || saved.stats2) {
@@ -152,8 +162,7 @@ async function restoreState() {
   // the two to compare, which beats both the saved fields and the open tabs.
   const requested = requestedComparison(window.location.search);
   if (requested) {
-    activity1Input.value = activityUrl(requested.activity1Id);
-    activity2Input.value = activityUrl(requested.activity2Id);
+    await setActivityFields([requested.activity1Id, requested.activity2Id]);
     addLogEntry('Comparing the two activities picked on Strava', 'info');
     await compareActivities();
     return;
@@ -167,7 +176,7 @@ async function restoreState() {
   // nothing on screen would say so.
   if (comparisonShowing() && comparedIds && !fieldsMatchComparison()) {
     showStatus(
-      `The table shows your last comparison (${getDisplayName(1)} vs ${getDisplayName(2)}), ` +
+      `The table shows your last comparison (${comparisonTitle()}), ` +
         'not the activities in the fields above. Click Compare Activities to compare those.',
       'info'
     );
@@ -180,11 +189,118 @@ function comparisonShowing() {
 
 /** Whether the URL fields name the comparison on screen, in the same order. */
 function fieldsMatchComparison() {
+  const ids = activityUrlsFromFields().map(extractActivityIdFromUrl);
   return (
-    Boolean(comparedIds) &&
-    extractActivityIdFromUrl(activity1Input.value.trim()) === comparedIds.activity1 &&
-    extractActivityIdFromUrl(activity2Input.value.trim()) === comparedIds.activity2
+    Boolean(comparedIds) && ids.length === comparedIds.length && ids.every((id, k) => id === comparedIds[k])
   );
+}
+
+/** "Ada vs Grace", or every name for three or more. */
+function comparisonTitle() {
+  return comparison.athletes
+    ? distinctDisplayNames(comparison.athletes).join(', ')
+    : `${getDisplayName(1)} vs ${getDisplayName(2)}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Activity 3 and on
+ *
+ * Fields beyond the first two, added on request, so the common case of two
+ * stays as it was. Saved like the first two, since a group ride is usually
+ * compared more than once.
+ * ------------------------------------------------------------------ */
+
+const EXTRA_ACTIVITIES_KEY = 'extraActivities';
+// Five in all: beyond that the table outgrows even a full-width tab.
+const MAX_ACTIVITIES = 5;
+
+function extraActivityInputs() {
+  return [...extraActivitiesDiv.querySelectorAll('input')];
+}
+
+/** Every filled-in URL field, activity 1 first. Empty extra fields are skipped. */
+function activityUrlsFromFields() {
+  const extras = extraActivityInputs()
+    .map(input => input.value.trim())
+    .filter(Boolean);
+  return [activity1Input.value.trim(), activity2Input.value.trim(), ...extras];
+}
+
+function saveExtraActivities() {
+  return chrome.storage.local.set({ [EXTRA_ACTIVITIES_KEY]: extraActivityInputs().map(input => input.value.trim()) });
+}
+
+/** Number the extra fields 3, 4, 5 again after one is removed. */
+function renumberExtraActivityFields() {
+  extraActivitiesDiv.querySelectorAll('.extra-activity').forEach((row, k) => {
+    const number = k + 3;
+    const input = row.querySelector('input');
+    input.id = `activity${number}`;
+    const label = row.querySelector('label');
+    label.htmlFor = input.id;
+    label.textContent = `Activity ${number} URL:`;
+    row.querySelector('button').setAttribute('aria-label', `Remove activity ${number}`);
+  });
+  addActivityBtn.classList.toggle('hidden', 2 + extraActivityInputs().length >= MAX_ACTIVITIES);
+}
+
+/** Add a field for one more activity, up to five in all. */
+function addExtraActivityField(value = '') {
+  if (2 + extraActivityInputs().length >= MAX_ACTIVITIES) return extraActivityInputs().pop();
+
+  const row = document.createElement('div');
+  row.className = 'extra-activity';
+
+  const label = document.createElement('label');
+  label.className = 'block text-sm font-bold mb-2 text-gray-700';
+
+  const line = document.createElement('div');
+  line.className = 'extra-activity-line';
+
+  const input = document.createElement('input');
+  input.type = 'url';
+  input.className = 'input-field';
+  input.placeholder = 'Another activity to compare with activity 1...';
+  input.value = value;
+  input.addEventListener('change', saveExtraActivities);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'extra-activity-remove';
+  remove.textContent = '\u00d7';
+  remove.title = 'Remove this activity';
+  remove.addEventListener('click', () => {
+    if (running) return;
+    row.remove();
+    renumberExtraActivityFields();
+    saveExtraActivities();
+  });
+
+  line.append(input, remove);
+  row.append(label, line);
+  extraActivitiesDiv.appendChild(row);
+  renumberExtraActivityFields();
+  return input;
+}
+
+/**
+ * Fill the fields with exactly these activities: a link or a recent pair
+ * names two, and a third field left over would quietly make it a different
+ * comparison.
+ */
+async function setActivityFields(ids) {
+  activity1Input.value = activityUrl(ids[0]);
+  activity2Input.value = activityUrl(ids[1]);
+  if (extraActivityInputs().length) {
+    extraActivitiesDiv.replaceChildren();
+    renumberExtraActivityFields();
+    addLogEntry('Removed the extra activity fields, to compare these two', 'info');
+  }
+  await chrome.storage.local.set({
+    activity1: activity1Input.value,
+    activity2: activity2Input.value,
+    [EXTRA_ACTIVITIES_KEY]: []
+  });
 }
 
 async function clearResults() {
@@ -584,7 +700,7 @@ async function runExclusive(task) {
 function setRunControlsDisabled(disabled) {
   const suggestions = myActivitiesSection.querySelectorAll('.activity-option');
   // Clear too: clearing under a run would only be undone when it finishes.
-  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, recentSelect, ...suggestions].forEach(button => {
+  [compareBtn, swapBtn, prBtn, refreshPrBtn, myActivitiesBtn, clearBtn, recentSelect, addActivityBtn, ...suggestions].forEach(button => {
     button.disabled = disabled;
   });
 }
@@ -594,6 +710,9 @@ function compareActivities() {
 }
 
 async function readAndCompare() {
+  const urls = activityUrlsFromFields();
+  if (urls.length > 2) return readAndCompareMany(urls);
+
   const activity1Url = activity1Input.value.trim();
   const activity2Url = activity2Input.value.trim();
 
@@ -633,7 +752,7 @@ async function readAndCompare() {
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
-    comparedIds = { activity1: activity1Id, activity2: activity2Id };
+    comparedIds = [activity1Id, activity2Id];
     logNestingSupport(activity1Data.segments, comparison.matched);
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
@@ -654,6 +773,63 @@ async function readAndCompare() {
 
     await saveComparison();
     if (comparison.matched.length) await rememberRecent(activity1Data, activity2Data);
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+  }
+}
+
+/**
+ * Compare three to five activities, each against activity 1.
+ *
+ * A separate path from the two-activity one rather than a generalisation of
+ * it: power, heart rate, PRs and the rest are comparisons of two, and stay
+ * so. This one answers who was fastest across the segments everyone rode.
+ */
+async function readAndCompareMany(urls) {
+  if (!urls.every(isValidStravaActivityUrl)) {
+    showStatus('Please enter valid Strava activity URLs', 'error');
+    return;
+  }
+  const ids = urls.map(extractActivityIdFromUrl);
+  if (new Set(ids).size !== ids.length) {
+    showStatus('The same activity is in two of the fields', 'error');
+    return;
+  }
+
+  await chrome.storage.local.set({ activity1: urls[0], activity2: urls[1] });
+  await saveExtraActivities();
+  showStatus(`Fetching segment data from ${ids.length} activities...`, 'loading');
+
+  try {
+    const openTabs = await findActivityTabs();
+    const proxyTabId = await findProxyTabId();
+    const activities = await Promise.all(ids.map(id => fetchActivityData(id, openTabs, proxyTabId)));
+
+    const athletes = activities.map((activity, k) => activity.athleteName || `Activity ${ids[k]}`);
+    [athlete1Name, athlete2Name] = athletes;
+    await chrome.storage.local.set({ athlete1Name, athlete2Name });
+    activities.forEach((activity, k) => addLogEntry(`Activity #${k + 1}: ${activity.segments.length} segments`, 'success'));
+
+    const { rows, notInAll } = compareManySegmentLists(activities.map(activity => activity.segments));
+    comparison = { matched: rows, onlyIn1: notInAll, onlyIn2: [], athletes };
+    comparedIds = ids;
+    sortState = { key: null, direction: 'desc' };
+    excludeNested = false;
+    filterText = '';
+    tableSearch.value = '';
+    // The stats panels are a side-by-side of two; with more they would not fit.
+    lastStats = { stats1: [], stats2: [] };
+
+    if (!rows.length) {
+      showStatus(`No segment was ridden in all ${ids.length} activities`, 'error');
+    } else {
+      showStatus(`Compared ${rows.length} segments ridden in all ${ids.length} activities`, 'success');
+    }
+
+    renderComparison(comparison);
+    displayStatsComparison([], []);
+    resultsDiv.classList.remove('hidden');
+    await saveComparison();
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
   }
@@ -736,8 +912,8 @@ function saveComparison() {
       matched: comparison.matched,
       onlyIn1: comparison.onlyIn1,
       onlyIn2: comparison.onlyIn2,
-      activity1Id: comparedIds ? comparedIds.activity1 : null,
-      activity2Id: comparedIds ? comparedIds.activity2 : null,
+      activityIds: comparedIds,
+      athletes: comparison.athletes || null,
       rateLabel,
       stats1: lastStats.stats1,
       stats2: lastStats.stats2
@@ -770,10 +946,10 @@ function recentSideLabel(index, data, activityId) {
 
 async function rememberRecent(activity1Data, activity2Data) {
   const entry = {
-    activity1Id: comparedIds.activity1,
-    activity2Id: comparedIds.activity2,
-    label1: recentSideLabel(1, activity1Data, comparedIds.activity1),
-    label2: recentSideLabel(2, activity2Data, comparedIds.activity2),
+    activity1Id: comparedIds[0],
+    activity2Id: comparedIds[1],
+    label1: recentSideLabel(1, activity1Data, comparedIds[0]),
+    label2: recentSideLabel(2, activity2Data, comparedIds[1]),
     netSeconds: summarizeComparison(comparison.matched).netSeconds,
     comparedAt: Date.now()
   };
@@ -804,7 +980,7 @@ function renderRecentComparisons(list) {
 }
 
 /** Compare a pair from the list again. */
-function compareRecent() {
+async function compareRecent() {
   const value = recentSelect.value;
   // Back to the heading, so picking the same pair again is a change too.
   recentSelect.value = '';
@@ -812,8 +988,7 @@ function compareRecent() {
   const entry = value === '' ? null : recentComparisons[Number(value)];
   if (!entry) return;
 
-  activity1Input.value = activityUrl(entry.activity1Id);
-  activity2Input.value = activityUrl(entry.activity2Id);
+  await setActivityFields([entry.activity1Id, entry.activity2Id]);
   return compareActivities();
 }
 
@@ -979,6 +1154,10 @@ function refreshPersonalRecords() {
 }
 
 async function addPersonalRecords({ refresh = false } = {}) {
+  if (comparison.athletes) {
+    showStatus('Compare vs my PRs works on a comparison of two activities', 'error');
+    return;
+  }
   if (!comparison.matched.length) {
     showStatus('Compare two activities first', 'error');
     return;
@@ -1564,8 +1743,43 @@ const COLUMNS = [
   }
 ];
 
+/**
+ * The columns of a comparison of three or more: each activity's time, and
+ * after activity 1 its difference from activity 1's. In the popup only the
+ * differences show next to activity 1's time; the other times are a click away.
+ */
+function manyColumns(data) {
+  const names = distinctDisplayNames(data.athletes);
+  const columns = [COLUMNS[0]];
+
+  names.forEach((name, k) => {
+    columns.push({
+      key: `mtime_${k}`,
+      core: k === 0,
+      className: 'col-time',
+      label: () => `Time (${name})`,
+      build: row => buildTimeCell(row.times[k], (row.achievements || [])[k]),
+      text: row => row.times[k]
+    });
+    if (k === 0) return;
+    columns.push({
+      key: `mdiff_${k}`,
+      core: true,
+      className: 'col-diff',
+      label: () => `Diff (${name})`,
+      headerTitle: () => `${name}'s time minus ${names[0]}'s`,
+      text: row => formatTimeDiff(row.diffs[k]),
+      style: row => diffStyle(row.diffs[k], false, 60),
+      mark: row => isImprovement(row.diffs[k], false)
+    });
+  });
+
+  return columns;
+}
+
 /** Every column the data has something to show in. The CSV always gets these. */
 function columnsWithData(data) {
+  if (data.athletes) return manyColumns(data);
   return COLUMNS.filter(column => !column.when || column.when(data));
 }
 
@@ -1613,7 +1827,7 @@ function toggleSort(key) {
   sortState =
     sortState.key === key
       ? { key, direction: sortState.direction === 'asc' ? 'desc' : 'asc' }
-      : { key, direction: DEFAULT_SORT_DIRECTION[key] || 'asc' };
+      : { key, direction: DEFAULT_SORT_DIRECTION[key] || (key.startsWith('mdiff_') ? 'desc' : 'asc') };
 
   renderComparison(comparison);
 }
@@ -1888,6 +2102,10 @@ function renderSummary(data) {
   container.replaceChildren();
 
   if (!data.matched.length) return;
+  if (data.athletes) {
+    renderManySummary(container, data);
+    return;
+  }
 
   const summary = summarizeComparison(data.matched, { excludeNested });
   if (!summary.compared) return;
@@ -1969,6 +2187,71 @@ function renderSummary(data) {
 }
 
 /**
+ * The standings for three or more: who was fastest across the segments all of
+ * them rode, as a net gap to activity 1, and on how many each was fastest.
+ */
+function renderManySummary(container, data) {
+  const names = distinctDisplayNames(data.athletes);
+  const summary = summarizeMany(data.matched, names.length, { excludeNested });
+
+  const panel = document.createElement('div');
+  panel.className = 'summary-panel';
+
+  const headline = document.createElement('div');
+  headline.className = 'summary-headline';
+  const caption = document.createElement('span');
+  caption.className = 'summary-caption';
+  caption.textContent =
+    `Across ${summary.compared} segment${summary.compared === 1 ? '' : 's'} ridden by all ` +
+    `${names.length} activities, against ${names[0]}`;
+  headline.appendChild(caption);
+  panel.appendChild(headline);
+
+  if (summary.compared) {
+    const list = document.createElement('ol');
+    list.className = 'standings';
+    summary.standings.forEach(standing => {
+      const item = document.createElement('li');
+
+      const name = document.createElement('span');
+      name.className = 'standing-name';
+      name.textContent = names[standing.index];
+      item.appendChild(name);
+
+      const net = document.createElement('span');
+      if (standing.index === 0) {
+        net.className = 'standing-net';
+        net.textContent = 'activity 1';
+      } else {
+        const behind = standing.netSeconds > 0;
+        net.className = `standing-net ${standing.netSeconds === 0 ? '' : behind ? 'summary-net-loss' : 'summary-net-gain'}`;
+        net.textContent = formatTimeDiff(standing.netSeconds);
+      }
+      item.appendChild(net);
+
+      const fastest = document.createElement('span');
+      fastest.className = 'standing-fastest';
+      fastest.textContent = `fastest on ${standing.fastestCount}`;
+      item.appendChild(fastest);
+
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+
+  if (summary.nestedCount) panel.appendChild(nestedToggle(summary.nestedCount));
+
+  const note = document.createElement('div');
+  note.className = 'summary-note';
+  note.textContent =
+    'Only segments every activity rode count, for everyone. Each net is the sum of per-segment ' +
+    `differences from ${names[0]}; power, heart rate and PRs are for comparisons of two.`;
+  panel.appendChild(note);
+
+  container.appendChild(panel);
+}
+
+/**
  * Your PRs added up, once "Compare vs my PRs" has filled them in. Follows the
  * nested-segments choice like the net does.
  */
@@ -2008,8 +2291,14 @@ function renderUnmatched(data) {
     section.appendChild(details);
   };
 
-  addGroup(data.onlyIn1, getDisplayName(1));
-  addGroup(data.onlyIn2, getDisplayName(2));
+  if (data.athletes) {
+    // Only activity 1's are listed: they are the rows the table would have had.
+    const names = distinctDisplayNames(data.athletes);
+    addGroup(data.onlyIn1, `${names[0]}, not ridden in all ${names.length}`);
+  } else {
+    addGroup(data.onlyIn1, getDisplayName(1));
+    addGroup(data.onlyIn2, getDisplayName(2));
+  }
 
   document.getElementById('unmatchedSlot').replaceChildren(section);
 }
@@ -2167,11 +2456,20 @@ function downloadBlob(blob, filename, onDone) {
  * out, so the paste matches what was on screen.
  */
 async function copySummary() {
+  if (comparison.athletes) {
+    const names = distinctDisplayNames(comparison.athletes);
+    return copyText(manySummaryText(summarizeMany(comparison.matched, names.length, { excludeNested }), names));
+  }
+
   const summary = summarizeComparison(comparison.matched, { excludeNested });
   const text = summaryText(summary, getDisplayName(1), getDisplayName(2), {
     excludeNested,
     prTotals: summaryPrTotals(comparison.matched)
   });
+  return copyText(text);
+}
+
+async function copyText(text) {
   if (!text) {
     showStatus('Nothing to copy yet — compare two activities first', 'error');
     return;
@@ -2331,6 +2629,11 @@ function drawSummaryCard(ctx, model) {
  * instead, so the click is never wasted.
  */
 async function copySummaryImage() {
+  if (comparison.athletes) {
+    showStatus('The image is for a comparison of two activities; Copy summary has the standings as text', 'error');
+    return;
+  }
+
   const summary = summarizeComparison(comparison.matched, { excludeNested });
   if (!summary.compared) {
     showStatus('Nothing to share yet — compare two activities first', 'error');

@@ -4,6 +4,12 @@
 
 ### 🆕 Improvements
 
+- **Compare up to five activities**: "+ Add activity" adds fields for
+  activities 3 to 5. With three or more, each is compared against activity 1
+  on the segments all of them rode: a time and a diff per activity, and a
+  summary ranking everyone by net gap with how many segments each was fastest
+  on. Sorting, filtering, the CSV, Copy summary and Open in tab all work on
+  it; power, heart rate, PRs and the image stay comparisons of two
 - **Compare from Strava's own pages**: a "⇄ Compare…" button in the corner of
   every activity page. Click it on one activity, then on another, and the
   comparison opens in a tab with the first pick as activity 1. Right-clicking

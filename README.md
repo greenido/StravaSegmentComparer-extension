@@ -12,6 +12,7 @@ If you have questions or issues, please open an issue on GitHub.
 - **Compare from Strava's pages**: A “⇄ Compare…” button on every activity page, and the same in the right-click menu on activity links. Pick one activity, then another, and the comparison opens in a tab
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
 - **Recent comparisons**: The last ten pairs, one pick away from being compared again
+- **Up to five activities**: Add activities 3 to 5 to rank a group ride against activity 1, segment by segment
 - **No tab flicker**: If the activities are already open, they’re read in place; otherwise the page is fetched in the background. A hidden tab is only opened as a last resort, and is closed again even if you close the popup first
 - **Segment comparison**: Matches segments by Strava's segment ID, so renamed segments still pair up and repeated efforts (laps, intervals) stay separate
 - **Time Diff %**: Each time difference as a share of activity 1's time, so a short segment counts as much as a long one
@@ -76,6 +77,25 @@ Required permissions: `storage`, `contextMenus` (the right-click “Pick this ac
 
 1. Copy/paste two activity URLs into the input fields
 2. Click “Compare Activities”
+
+### More than two activities
+
+Click “+ Add activity” under the URL fields to add activity 3, 4 and 5, and
+compare as usual. With three or more:
+
+- Only segments **every** activity rode are in the table, so no one's total is
+  helped by a segment they skipped. Activity 1's other segments are listed
+  under the table
+- Each activity gets a time column and a diff against activity 1. The popup
+  shows activity 1's time and the diffs; “Show all columns” adds the other
+  times
+- The summary ranks everyone by their net gap to activity 1 and says on how
+  many segments each was fastest. Copy summary puts the ranking on your
+  clipboard
+- Power, heart rate, Form, VAM, the PR lookup, the activity stats panels and
+  the image are comparisons of two, and are left out
+- ⇄ swaps activities 1 and 2, which changes who everyone is measured against.
+  A recent pair, or a pair picked on Strava's pages, replaces the extra fields
 
 ### From Strava's pages
 

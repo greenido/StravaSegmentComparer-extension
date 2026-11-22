@@ -56,7 +56,7 @@
     </div>
     
     <div class="card mb-4">
-      <div class="url-pair mb-4">
+      <div class="url-pair mb-2">
         <div>
           <label for="activity1" class="block text-sm font-bold mb-2 text-gray-700">Activity 1 URL:</label>
           <input type="url" id="activity1" placeholder="Auto-detected or enter manually..." required
@@ -76,6 +76,12 @@
         </div>
       </div>
       
+      <!-- Activity 3 to 5, added on request. -->
+      <div id="extraActivities" class="extra-activities"></div>
+      <div class="add-activity-row">
+        <button id="addActivityBtn" type="button" class="add-activity-btn" title="Compare up to five activities against activity 1">+ Add activity</button>
+      </div>
+
       <div class="flex justify-center gap-2">
         <button id="autoDetectBtn" class="btn text-xs py-1 px-3 bg-blue-500 hover:bg-blue-600" title="Auto-detect open Strava activity tabs">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
