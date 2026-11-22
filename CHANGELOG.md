@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Removed the Compare button on Strava's pages** and the right-click "Pick
+  this activity to compare" menu. Open the activities in tabs and use the
+  popup, as before. The extension no longer draws anything on Strava's pages,
+  and drops the `contextMenus` permission
+- An activity that is not open in a tab is now parsed by the Strava tab that
+  fetched it, not by the extension page, which stops Chrome logging a Content
+  Security Policy error for each inline event handler in Strava's markup
+
 ## Version 2.12 - Group rides, fewer clicks
 
 ### 🆕 Improvements

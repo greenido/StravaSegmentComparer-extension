@@ -3,7 +3,7 @@
   "name": "Strava Segment Comparator",
   "version": "2.12",
   "description": "Compare two Strava activities segment by segment: see where you gained or lost time vs. a friend, an old ride or your PRs.",
-  "permissions": ["storage", "contextMenus"],
+  "permissions": ["storage"],
   "host_permissions": ["https://www.strava.com/*"],
   "action": {
     "default_popup": "popup.html",
@@ -20,10 +20,6 @@
     {
       "matches": ["https://www.strava.com/*"],
       "js": ["extractor.js", "content-script.js"]
-    },
-    {
-      "matches": ["https://www.strava.com/activities/*"],
-      "js": ["page-button.js"]
     }
   ],
   "icons": {

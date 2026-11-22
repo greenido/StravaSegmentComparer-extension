@@ -158,16 +158,6 @@ async function restoreState() {
 
   renderRecentComparisons(data[RECENT_COMPARISONS_KEY]);
 
-  // A link from the button on Strava's pages or the right-click menu names
-  // the two to compare, which beats both the saved fields and the open tabs.
-  const requested = requestedComparison(window.location.search);
-  if (requested) {
-    await setActivityFields([requested.activity1Id, requested.activity2Id]);
-    addLogEntry('Comparing the two activities picked on Strava', 'info');
-    await compareActivities();
-    return;
-  }
-
   // Open tabs win over saved URLs: open two rides, click the icon, click
   // Compare is the quickest path there is, and it stays that way.
   await autoPopulateActivityUrls({ quiet: true });
@@ -500,16 +490,13 @@ async function extractFromTab(tabId) {
   return unwrap(response).data;
 }
 
-/** Ask any strava.com tab to fetch the activity for us, then parse it here. */
+/** Ask any strava.com tab to fetch and parse the activity for us. */
 async function extractViaProxyTab(proxyTabId, activityId) {
   const response = await chrome.tabs.sendMessage(proxyTabId, {
-    action: 'fetchActivityHtml',
+    action: 'fetchActivityData',
     activityId
   });
-
-  const html = unwrap(response).html;
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  return extractActivityData(doc, `https://www.strava.com/activities/${activityId}`);
+  return unwrap(response).data;
 }
 
 /** Poll a tab until its content script is injected and answering. */

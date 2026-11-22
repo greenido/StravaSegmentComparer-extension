@@ -38,7 +38,6 @@ import {
   personalRecordTotalsText,
   rememberComparison,
   activityTitle,
-  requestedComparison,
   compareManySegmentLists,
   summarizeMany,
   distinctDisplayNames,
@@ -1096,20 +1095,6 @@ describe('activityTitle', () => {
 
   it('shortens a long name', () => {
     expect(activityTitle(`${'a'.repeat(60)} | Ride | Strava`)).toHaveLength(40);
-  });
-});
-
-describe('requestedComparison', () => {
-  it('reads two activity ids from the link', () => {
-    expect(requestedComparison('?view=tab&compare=111,222')).toEqual({ activity1Id: '111', activity2Id: '222' });
-  });
-
-  it('ignores anything else', () => {
-    expect(requestedComparison('?view=tab')).toBeNull();
-    expect(requestedComparison('?compare=111')).toBeNull();
-    expect(requestedComparison('?compare=111,111')).toBeNull();
-    expect(requestedComparison('?compare=111,abc')).toBeNull();
-    expect(requestedComparison('')).toBeNull();
   });
 });
 
