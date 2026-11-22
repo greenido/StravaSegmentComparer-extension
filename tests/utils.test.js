@@ -38,7 +38,12 @@ import {
   personalRecordTotalsText,
   rememberComparison,
   activityTitle,
-  requestedComparison
+  requestedComparison,
+  compareManySegmentLists,
+  summarizeMany,
+  distinctDisplayNames,
+  manySummaryText,
+  isSortable
 } from '../utils.js';
 
 describe('parseTimeToSeconds', () => {
@@ -1105,5 +1110,124 @@ describe('requestedComparison', () => {
     expect(requestedComparison('?compare=111,111')).toBeNull();
     expect(requestedComparison('?compare=111,abc')).toBeNull();
     expect(requestedComparison('')).toBeNull();
+  });
+});
+
+describe('compareManySegmentLists', () => {
+  const seg = (segmentId, time, extra = {}) => ({ segmentId, occurrence: 0, name: `S${segmentId}`, time, ...extra });
+
+  it('keeps only the segments every activity rode, in activity 1 order', () => {
+    const { rows, notInAll } = compareManySegmentLists([
+      [seg('1', '5:00'), seg('2', '2:00'), seg('3', '1:00')],
+      [seg('3', '1:05'), seg('1', '5:10'), seg('2', '1:50')],
+      [seg('1', '4:55'), seg('3', '0:58')]
+    ]);
+
+    expect(rows.map(row => row.segmentId)).toEqual(['1', '3']);
+    expect(notInAll.map(segment => segment.segmentId)).toEqual(['2']);
+  });
+
+  it('gives each activity its time and its difference from activity 1', () => {
+    const [row] = compareManySegmentLists([[seg('1', '5:00')], [seg('1', '5:10')], [seg('1', '4:55')]]).rows;
+
+    expect(row.times).toEqual(['5:00', '5:10', '4:55']);
+    expect(row.seconds).toEqual([300, 310, 295]);
+    expect(row.diffs).toEqual([null, 10, -5]);
+  });
+
+  it('keeps laps of one segment apart', () => {
+    const laps = times => times.map((time, occurrence) => seg('1', time, { occurrence }));
+    const { rows } = compareManySegmentLists([laps(['5:00', '5:02']), laps(['5:10', '5:12']), laps(['4:55'])]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].diffs).toEqual([null, 10, -5]);
+  });
+
+  it('has no diff where a time could not be read', () => {
+    const [row] = compareManySegmentLists([[seg('1', '5:00')], [seg('1', null)], [seg('1', '4:55')]]).rows;
+    expect(row.diffs).toEqual([null, null, -5]);
+  });
+});
+
+describe('summarizeMany', () => {
+  const row = (seconds, extra = {}) => ({ seconds, ...extra });
+
+  it('keeps field order when the nets tie', () => {
+    const summary = summarizeMany([row([300, 310, 295]), row([120, 110, 125])], 3);
+
+    expect(summary.compared).toBe(2);
+    expect(summary.standings).toEqual([
+      { index: 0, netSeconds: 0, fastestCount: 0 },
+      { index: 1, netSeconds: 0, fastestCount: 1 },
+      { index: 2, netSeconds: 0, fastestCount: 1 }
+    ]);
+  });
+
+  it('puts the fastest overall first', () => {
+    const summary = summarizeMany([row([300, 310, 290]), row([120, 125, 118])], 3);
+    expect(summary.standings.map(s => s.index)).toEqual([2, 0, 1]);
+    expect(summary.standings[0]).toEqual({ index: 2, netSeconds: -12, fastestCount: 2 });
+  });
+
+  it('counts a tie for fastest for everyone in it', () => {
+    const summary = summarizeMany([row([300, 300, 310])], 3);
+    expect(summary.standings.find(s => s.index === 0).fastestCount).toBe(1);
+    expect(summary.standings.find(s => s.index === 1).fastestCount).toBe(1);
+  });
+
+  it('leaves out a segment someone has no time on, for everyone', () => {
+    const summary = summarizeMany([row([300, null, 290]), row([120, 125, 118])], 3);
+    expect(summary.compared).toBe(1);
+    expect(summary.notComparable).toBe(1);
+    expect(summary.standings.find(s => s.index === 2).netSeconds).toBe(-2);
+  });
+
+  it('leaves nested segments out when asked', () => {
+    const rows = [row([300, 310, 290]), row([60, 70, 50], { nestedIn: 'Lap' })];
+    expect(summarizeMany(rows, 3).compared).toBe(2);
+    expect(summarizeMany(rows, 3, { excludeNested: true }).compared).toBe(1);
+    expect(summarizeMany(rows, 3).nestedCount).toBe(1);
+  });
+});
+
+describe('distinctDisplayNames', () => {
+  it('uses the athletes, unless two share a name', () => {
+    expect(distinctDisplayNames(['Ada', 'Grace', 'Ken'])).toEqual(['Ada', 'Grace', 'Ken']);
+    expect(distinctDisplayNames(['Ada', 'ada', 'Ken'])).toEqual(['Activity 1', 'Activity 2', 'Ken']);
+    expect(distinctDisplayNames(['', 'Grace', null])).toEqual(['Activity 1', 'Grace', 'Activity 3']);
+  });
+});
+
+describe('manySummaryText', () => {
+  it('lists the standings for a chat', () => {
+    const summary = summarizeMany([{ seconds: [300, 310, 290] }], 3);
+    expect(manySummaryText(summary, ['Ada', 'Grace', 'Ken'])).toBe(
+      [
+        'Across 1 segment ridden by all 3:',
+        '1. Ken (-0:10 vs Ada) · fastest on 1',
+        '2. Ada (activity 1) · fastest on 0',
+        '3. Grace (+0:10 vs Ada) · fastest on 0'
+      ].join('\n')
+    );
+  });
+
+  it('is empty when nothing could be compared', () => {
+    expect(manySummaryText(summarizeMany([], 3), ['Ada', 'Grace', 'Ken'])).toBe('');
+  });
+});
+
+describe('sorting a comparison of three or more', () => {
+  const rows = [
+    { name: 'A', seconds: [300, 310, 290], diffs: [null, 10, -10] },
+    { name: 'B', seconds: [100, 130, 99], diffs: [null, 30, -1] },
+    { name: 'C', seconds: [200, null, 205], diffs: [null, null, 5] }
+  ];
+
+  it('sorts by any activity\'s time or diff, missing values last', () => {
+    expect(isSortable('mdiff_1')).toBe(true);
+    expect(isSortable('mtime_4')).toBe(true);
+    expect(isSortable('mdiff_x')).toBe(false);
+    expect(sortMatched(rows, 'mdiff_1', 'desc').map(r => r.name)).toEqual(['B', 'A', 'C']);
+    expect(sortMatched(rows, 'mtime_2', 'asc').map(r => r.name)).toEqual(['B', 'C', 'A']);
   });
 });

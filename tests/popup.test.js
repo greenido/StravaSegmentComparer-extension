@@ -1143,8 +1143,7 @@ describe('a restored comparison and the URL fields', () => {
         matched: [row()],
         onlyIn1: [],
         onlyIn2: [],
-        activity1Id: '1',
-        activity2Id: '2',
+        activityIds: ['1', '2'],
         rateLabel: 'Speed',
         ...saved
       }
@@ -1179,7 +1178,7 @@ describe('a restored comparison and the URL fields', () => {
   });
 
   it('stays quiet about a comparison saved before the ids were', async () => {
-    await openWith([tab(3), tab(4)], { activity1Id: undefined, activity2Id: undefined });
+    await openWith([tab(3), tab(4)], { activityIds: undefined });
     expect(status().classList.contains('hidden')).toBe(true);
   });
 
@@ -2463,5 +2462,234 @@ describe('copying the summary as an image', () => {
 
   it('cuts a line short rather than letting it run off the card', async () => {
     expect(fitText({ measureText: text => ({ width: text.length * 10 }) }, 'a'.repeat(100), 200)).toHaveLength(20);
+  });
+});
+
+describe('more than two activities', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+  const extraInputs = () => [...document.querySelectorAll('#extraActivities input')];
+  const addBtn = () => document.getElementById('addActivityBtn');
+  const status = () => document.getElementById('status');
+  let store;
+  let read;
+
+  // Activity 1..4 by Ada, Grace, Ken and Lin; segment 3 is not in Lin's ride.
+  const athletes = { 1: 'Ada', 2: 'Grace', 3: 'Ken', 4: 'Lin' };
+  const times = {
+    1: ['5:00', '2:00', '1:00'],
+    2: ['5:10', '1:50', '1:05'],
+    3: ['4:55', '2:05', '0:58'],
+    4: ['5:20', '2:10']
+  };
+
+  const open = async (saved = {}) => {
+    store = { ...saved };
+    read = [];
+    await loadPopup({
+      storage: storageWith(store),
+      tabs: {
+        ...stubChrome().tabs,
+        query: async () => [1, 2, 3, 4].map(id => ({ id, url: `https://www.strava.com/activities/${id}` })),
+        sendMessage: async (tabId, request) => {
+          if (request.action === 'ping') return { ok: true };
+          read.push(tabId);
+          return {
+            ok: true,
+            data: {
+              athleteName: athletes[tabId],
+              activityStats: [{ label: 'Distance', value: '10 km' }],
+              segments: times[tabId].map((time, i) => ({
+                segmentId: String(i + 1),
+                occurrence: 0,
+                name: `Segment ${i + 1}`,
+                time
+              }))
+            }
+          };
+        }
+      }
+    });
+    await settle();
+  };
+
+  const fill = urls => {
+    document.getElementById('activity1').value = urls[0];
+    document.getElementById('activity2').value = urls[1];
+    urls.slice(2).forEach(url => {
+      addBtn().click();
+      extraInputs().pop().value = url;
+    });
+  };
+  const url = id => `https://www.strava.com/activities/${id}`;
+
+  describe('the extra fields', () => {
+    it('adds fields for activities 3 to 5, then stops offering more', async () => {
+      await open();
+
+      addBtn().click();
+      addBtn().click();
+      expect(addBtn().classList.contains('hidden')).toBe(false);
+      addBtn().click();
+
+      expect(extraInputs().map(input => input.id)).toEqual(['activity3', 'activity4', 'activity5']);
+      expect(document.querySelector('label[for="activity5"]').textContent).toBe('Activity 5 URL:');
+      expect(addBtn().classList.contains('hidden')).toBe(true);
+    });
+
+    it('numbers the fields again after one is removed, and saves them', async () => {
+      await open();
+      addBtn().click();
+      addBtn().click();
+      extraInputs()[0].value = url(3);
+      extraInputs()[1].value = url(4);
+
+      document.querySelector('.extra-activity-remove').click();
+      await settle();
+
+      expect(extraInputs().map(input => [input.id, input.value])).toEqual([['activity3', url(4)]]);
+      expect(store.extraActivities).toEqual([url(4)]);
+    });
+
+    it('comes back when the popup opens again', async () => {
+      await open({ extraActivities: [url(3)] });
+      expect(extraInputs().map(input => input.value)).toEqual([url(3)]);
+    });
+  });
+
+  describe('a comparison of three', () => {
+    beforeEach(async () => {
+      await open();
+      fill([url(1), url(2), url(3)]);
+      await compareActivities();
+    });
+
+    it('reads every activity once', () => {
+      expect(read.sort()).toEqual([1, 2, 3]);
+    });
+
+    it('shows activity 1 and each diff in the popup, every time on request', () => {
+      expect(headers()).toEqual(['Segment Name', 'Time (Ada)', 'Diff (Grace)', 'Diff (Ken)']);
+
+      document.getElementById('columnsToggle').click();
+      expect(headers()).toEqual([
+        'Segment Name',
+        'Time (Ada)',
+        'Time (Grace)',
+        'Diff (Grace)',
+        'Time (Ken)',
+        'Diff (Ken)'
+      ]);
+    });
+
+    it('shades each diff against activity 1', () => {
+      const firstRow = document.querySelector('#segmentsTableBody tr');
+      expect(firstRow.children[2].firstChild.textContent).toBe('+0:10');
+      expect(firstRow.children[2].style.backgroundColor).toContain('220, 38, 38');
+      expect(firstRow.children[3].firstChild.textContent).toBe('-0:05');
+      expect(firstRow.children[3].style.backgroundColor).toContain('34, 197, 94');
+    });
+
+    it('ranks everyone in the summary', () => {
+      const items = [...document.querySelectorAll('.standings li')].map(li => li.textContent);
+      // Nets: Grace +0:10 -0:10 +0:05 = +0:05; Ken -0:05 +0:05 -0:02 = -0:02.
+      expect(items).toEqual([
+        'Ken-0:02fastest on 2',
+        'Adaactivity 1fastest on 0',
+        'Grace+0:05fastest on 1'
+      ]);
+      expect(document.querySelector('.summary-caption').textContent).toBe(
+        'Across 3 segments ridden by all 3 activities, against Ada'
+      );
+    });
+
+    it('sorts by a diff column, biggest loss first', () => {
+      [...document.querySelectorAll('#segmentsTable thead th')].find(th => th.textContent === 'Diff (Grace)').click();
+      const names = [...document.querySelectorAll('#segmentsTableBody tr')].map(tr => tr.querySelector('a, td').textContent);
+      expect(names[0]).toContain('Segment 1');
+      expect(names[2]).toContain('Segment 2');
+    });
+
+    it('exports every activity\'s time and diff', async () => {
+      const csv = await capturedCsv(() => exportAsCSV());
+      const [header, first] = csv.split('\n');
+      expect(header).toBe(
+        '"Segment Name","Time (Ada)","Time (Grace)","Diff (Grace)","Time (Ken)","Diff (Ken)"'
+      );
+      expect(first).toBe('"Segment 1","5:00","5:10","+0:10","4:55","-0:05"');
+    });
+
+    it('copies the standings as text', async () => {
+      const copied = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: async text => copied.push(text) },
+        configurable: true
+      });
+      document.getElementById('copyBtn').click();
+      await settle();
+      expect(copied[0]).toContain('1. Ken (-0:02 vs Ada) · fastest on 2');
+    });
+
+    it('says the PR lookup and the image are for two activities', async () => {
+      await loadPersonalRecords();
+      expect(status().textContent).toContain('Compare vs my PRs works on a comparison of two activities');
+
+      document.getElementById('imageBtn').click();
+      await settle();
+      expect(status().textContent).toContain('The image is for a comparison of two activities');
+    });
+
+    it('leaves out the side-by-side stats panels', () => {
+      expect(document.getElementById('activityStatsSection')).toBeNull();
+    });
+
+    it('is restored as it was the next time the popup opens', async () => {
+      const saved = store;
+      await open(saved);
+      expect(headers()).toEqual(['Segment Name', 'Time (Ada)', 'Diff (Grace)', 'Diff (Ken)']);
+      expect(document.querySelectorAll('.standings li')).toHaveLength(3);
+    });
+
+    it('redoes the comparison with a new activity 1 on swap', async () => {
+      document.getElementById('swapBtn').click();
+      await settle();
+      expect(headers()).toEqual(['Segment Name', 'Time (Grace)', 'Diff (Ada)', 'Diff (Ken)']);
+    });
+  });
+
+  it('lists activity 1\'s segments that not everyone rode', async () => {
+    await open();
+    fill([url(1), url(2), url(4)]);
+    await compareActivities();
+
+    expect(document.querySelectorAll('#segmentsTableBody tr')).toHaveLength(2);
+    expect(document.getElementById('unmatchedSection').textContent).toContain(
+      '1 segment only in Ada, not ridden in all 3'
+    );
+  });
+
+  it('refuses the same activity in two fields', async () => {
+    await open();
+    fill([url(1), url(2), url(1)]);
+    await compareActivities();
+
+    expect(status().textContent).toBe('The same activity is in two of the fields');
+    expect(read).toEqual([]);
+  });
+
+  it('compares two again when a recent pair is picked, dropping the extra fields', async () => {
+    await open({ recentComparisons: [{ activity1Id: '1', activity2Id: '2', label1: 'Ada', label2: 'Grace' }] });
+    fill([url(3), url(4), url(1)]);
+
+    const select = document.getElementById('recentSelect');
+    select.value = '0';
+    select.dispatchEvent(new Event('change'));
+    await settle();
+
+    expect(extraInputs()).toEqual([]);
+    expect(read.sort()).toEqual([1, 2]);
+    expect(headers()).toContain('Time Diff');
   });
 });

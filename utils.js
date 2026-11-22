@@ -699,9 +699,25 @@ const SORT_ACCESSORS = {
   history: row => row.history_rank
 };
 
+/**
+ * How to read a column for sorting. The fixed columns are in SORT_ACCESSORS;
+ * a comparison of three or more activities has a time and a diff column per
+ * activity, `mtime_{k}` and `mdiff_{k}`, read from the row's arrays.
+ */
+function sortAccessor(key) {
+  if (Object.prototype.hasOwnProperty.call(SORT_ACCESSORS, key)) return SORT_ACCESSORS[key];
+
+  const many = /^m(time|diff)_(\d)$/.exec(key || '');
+  if (!many) return null;
+  const index = Number(many[2]);
+  return many[1] === 'time'
+    ? row => (row.seconds || [])[index]
+    : row => (row.diffs || [])[index];
+}
+
 /** Whether a column can be sorted, so the UI knows which headers are clickable. */
 function isSortable(key) {
-  return Object.prototype.hasOwnProperty.call(SORT_ACCESSORS, key);
+  return sortAccessor(key) !== null;
 }
 
 function isMissing(value) {
@@ -717,7 +733,7 @@ function isMissing(value) {
  */
 function sortMatched(matched, key, direction = 'asc') {
   const rows = [...(matched || [])];
-  const accessor = SORT_ACCESSORS[key];
+  const accessor = sortAccessor(key);
   if (!accessor) return rows;
 
   const sign = direction === 'desc' ? -1 : 1;
@@ -1005,6 +1021,112 @@ function requestedComparison(search) {
   return { activity1Id: match[1], activity2Id: match[2] };
 }
 
+/* ------------------------------------------------------------------ *
+ * Three or more activities
+ * ------------------------------------------------------------------ */
+
+/**
+ * Pair up the segments of several activities against the first.
+ *
+ * A row is a segment every activity rode, in activity 1's page order, with
+ * each activity's time and its difference from activity 1's. A segment some
+ * of them skipped is left out of the table and returned in `notInAll`, so a
+ * ranking is never built from segments only some riders had a time on.
+ *
+ * @param {Array<Array>} lists  each activity's segments, activity 1 first
+ * @returns {{rows: Array, notInAll: Array}}
+ */
+function compareManySegmentLists(lists) {
+  const [first, ...others] = lists || [];
+  const byKey = others.map(list => new Map((list || []).map(segment => [segmentKey(segment), segment])));
+
+  const rows = [];
+  const notInAll = [];
+
+  markNestedSegments(first).forEach(segment1 => {
+    const key = segmentKey(segment1);
+    const efforts = [segment1, ...byKey.map(segments => segments.get(key))];
+    if (efforts.some(effort => !effort)) {
+      notInAll.push(segment1);
+      return;
+    }
+
+    const seconds = efforts.map(effort => parseTimeToSeconds(effort.time));
+    const grade = efforts.map(effort => effort.grade).find(g => typeof g === 'number' && Number.isFinite(g));
+
+    rows.push({
+      key,
+      segmentId: segment1.segmentId || null,
+      name: segment1.name,
+      link: segment1.link,
+      distance: efforts.map(effort => effort.distance).find(Boolean) || null,
+      grade: grade === undefined ? null : grade,
+      nestedIn: segment1.nestedIn || null,
+      times: efforts.map(effort => effort.time || 'N/A'),
+      seconds,
+      // Activity 2 minus activity 1, and so on, as everywhere else.
+      diffs: seconds.map((value, k) => (k === 0 || value === null || seconds[0] === null ? null : value - seconds[0])),
+      achievements: efforts.map(effort => achievementLabel(effort.achievement))
+    });
+  });
+
+  return { rows, notInAll };
+}
+
+/**
+ * Who was fastest overall, as a standing per activity.
+ *
+ * Only segments every activity has a time on count, for everyone, so no one's
+ * total is helped by a segment they did not ride. The net is the plain sum of
+ * per-segment differences from activity 1, as in the two-activity summary.
+ *
+ * @returns {{compared: number, nestedCount: number, notComparable: number,
+ *   standings: Array<{index: number, netSeconds: number, fastestCount: number}>}}
+ *   standings fastest first
+ */
+function summarizeMany(rows, count, options = {}) {
+  const all = rows || [];
+  const complete = row => (row.seconds || []).length === count && row.seconds.every(s => typeof s === 'number');
+  const usable = all.filter(row => complete(row) && !(options.excludeNested && row.nestedIn));
+
+  const standings = Array.from({ length: count }, (_, index) => ({
+    index,
+    netSeconds: usable.reduce((sum, row) => sum + (row.seconds[index] - row.seconds[0]), 0),
+    // A tie for the fastest time counts for everyone in it.
+    fastestCount: usable.filter(row => row.seconds[index] === Math.min(...row.seconds)).length
+  })).sort((a, b) => a.netSeconds - b.netSeconds || a.index - b.index);
+
+  return {
+    compared: usable.length,
+    nestedCount: all.filter(row => row.nestedIn).length,
+    notComparable: all.filter(row => !complete(row)).length,
+    standings
+  };
+}
+
+/**
+ * What to call each activity: its athlete, unless two share a name — several
+ * of your own rides — when the activity number says which is which.
+ */
+function distinctDisplayNames(names) {
+  const clean = (names || []).map(name => String(name || '').replace(/\s+/g, ' ').trim());
+  return clean.map((name, k) =>
+    !name || clean.filter(other => other.toLowerCase() === name.toLowerCase()).length > 1 ? `Activity ${k + 1}` : name
+  );
+}
+
+/** The standings as plain text, for a chat or club thread. */
+function manySummaryText(summary, names) {
+  if (!summary || !summary.compared) return '';
+
+  const lines = [`Across ${summary.compared} segment${summary.compared === 1 ? '' : 's'} ridden by all ${names.length}:`];
+  summary.standings.forEach((standing, rank) => {
+    const gap = standing.index === 0 ? 'activity 1' : `${formatTimeDiff(standing.netSeconds)} vs ${names[0]}`;
+    lines.push(`${rank + 1}. ${names[standing.index]} (${gap}) · fastest on ${standing.fastestCount}`);
+  });
+  return lines.join('\n');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     KM_PER_MILE,
@@ -1051,6 +1173,10 @@ if (typeof module !== 'undefined' && module.exports) {
     personalRecordTotalsText,
     rememberComparison,
     activityTitle,
-    requestedComparison
+    requestedComparison,
+    compareManySegmentLists,
+    summarizeMany,
+    distinctDisplayNames,
+    manySummaryText
   };
 }
