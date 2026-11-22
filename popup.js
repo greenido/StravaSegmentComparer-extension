@@ -14,7 +14,8 @@ const STORAGE_KEYS = [
   'activity2',
   'athlete1Name',
   'athlete2Name',
-  'comparisonResults'
+  'comparisonResults',
+  'showAllColumns'
 ];
 
 // DOM Elements
@@ -39,6 +40,7 @@ const filterCount = document.getElementById('filterCount');
 const helpBtn = document.getElementById('helpBtn');
 const helpSection = document.getElementById('helpSection');
 const versionSpan = document.getElementById('version');
+const columnsToggle = document.getElementById('columnsToggle');
 
 let logEntries = [];
 
@@ -65,6 +67,11 @@ let excludeNested = false;
 
 // Substring the table is narrowed to, by segment name. Also a view choice.
 let filterText = '';
+
+// Whether the popup shows every column rather than the core few. Unlike the
+// sort, this is a preference, so it is remembered across opens.
+const SHOW_ALL_COLUMNS_KEY = 'showAllColumns';
+let showAllColumns = false;
 
 /* ------------------------------------------------------------------ *
  * Startup
@@ -98,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   openTabBtn.addEventListener('click', openInTab);
+  columnsToggle.addEventListener('click', toggleAllColumns);
   tableSearch.addEventListener('input', () => {
     filterText = tableSearch.value.trim();
     renderComparison(comparison);
@@ -114,6 +122,7 @@ async function restoreState() {
   if (data.activity2) activity2Input.value = data.activity2;
   if (data.athlete1Name) athlete1Name = data.athlete1Name;
   if (data.athlete2Name) athlete2Name = data.athlete2Name;
+  showAllColumns = data[SHOW_ALL_COLUMNS_KEY] === true;
 
   const saved = data.comparisonResults;
   if (saved && saved.matched) {
@@ -204,6 +213,8 @@ function applyTabView() {
   document.body.classList.add('view-tab');
   // Opening a tab from a tab would be a curiosity, not a feature.
   openTabBtn.classList.add('hidden');
+  // Every column is always shown here, so there is nothing to toggle.
+  columnsToggle.classList.add('hidden');
 }
 
 function openInTab() {
@@ -1281,6 +1292,7 @@ function buildTimeCell(time, medal) {
 const COLUMNS = [
   {
     key: 'name',
+    core: true,
     className: 'col-segment',
     label: () => 'Segment Name',
     build: buildNameCell,
@@ -1288,6 +1300,7 @@ const COLUMNS = [
   },
   {
     key: 'time_1',
+    core: true,
     className: 'col-time',
     label: () => `Time (${getDisplayName(1)})`,
     build: row => buildTimeCell(row.time_1, row.achievement_1),
@@ -1295,6 +1308,7 @@ const COLUMNS = [
   },
   {
     key: 'time_2',
+    core: true,
     className: 'col-time',
     label: () => `Time (${getDisplayName(2)})`,
     build: row => buildTimeCell(row.time_2, row.achievement_2),
@@ -1302,6 +1316,7 @@ const COLUMNS = [
   },
   {
     key: 'time_diff',
+    core: true,
     className: 'col-diff',
     label: () => 'Time Diff',
     csvLabel: () => 'Time Difference',
@@ -1312,6 +1327,7 @@ const COLUMNS = [
   },
   {
     key: 'time_pct',
+    core: true,
     className: 'col-diff',
     label: () => 'Time Diff %',
     csvLabel: () => 'Time Difference %',
@@ -1335,6 +1351,7 @@ const COLUMNS = [
   },
   {
     key: 'rate_diff',
+    core: true,
     className: 'col-diff col-rate-diff',
     label: () => `${rateLabel} Diff`,
     csvLabel: () => `${rateLabel} Difference`,
@@ -1452,8 +1469,22 @@ const COLUMNS = [
   }
 ];
 
-function visibleColumns(data) {
+/** Every column the data has something to show in. The CSV always gets these. */
+function columnsWithData(data) {
   return COLUMNS.filter(column => !column.when || column.when(data));
+}
+
+/**
+ * The columns on screen.
+ *
+ * The popup is at most 800px wide, and with power, heart rate, VAM and PRs the
+ * table reaches twenty columns, so by default it shows the `core` few — the
+ * times and the gaps — and the rest are one click away. A tab has the room, so
+ * it always shows everything.
+ */
+function visibleColumns(data) {
+  const all = columnsWithData(data);
+  return isTabView() || showAllColumns ? all : all.filter(column => column.core);
 }
 
 /** Clicking a header sorts by it; clicking the active header reverses it. */
@@ -1557,8 +1588,37 @@ function renderFilterCount(shown, total) {
   filterCount.textContent = filtering ? `Showing ${shown} of ${total} segments` : '';
 }
 
+/** Show every column in the popup, or go back to the core few. */
+async function toggleAllColumns() {
+  showAllColumns = !showAllColumns;
+
+  // A sort by a column that is no longer on screen would order the table by
+  // something nobody can see, so it goes back to course order.
+  if (sortState.key && !visibleColumns(comparison).some(column => column.key === sortState.key)) {
+    sortState = { key: null, direction: 'desc' };
+  }
+
+  renderComparison(comparison);
+  await chrome.storage.local.set({ [SHOW_ALL_COLUMNS_KEY]: showAllColumns });
+}
+
+function renderColumnsToggle(data) {
+  if (isTabView()) return;
+
+  const hidden = columnsWithData(data).length - columnsWithData(data).filter(column => column.core).length;
+  columnsToggle.classList.toggle('hidden', hidden === 0);
+  columnsToggle.setAttribute('aria-pressed', String(showAllColumns));
+  columnsToggle.textContent = showAllColumns
+    ? 'Show fewer columns'
+    : `Show all columns (+${hidden})`;
+  columnsToggle.title = showAllColumns
+    ? 'Back to the times and the gaps'
+    : 'Add the remaining columns: speeds, power, heart rate, form, VAM and PRs, where the activities have them';
+}
+
 function renderComparison(data) {
   const columns = visibleColumns(data);
+  renderColumnsToggle(data);
   const rows = visibleRows(data.matched);
   renderFilterCount(rows.length, data.matched.length);
 
@@ -1954,8 +2014,9 @@ function exportAsCSV() {
     return;
   }
 
-  // Same columns the table is showing, in the same order, sort and filter.
-  const columns = visibleColumns(comparison);
+  // Every column with data, whether or not the popup is showing it — a file is
+  // not short of width — in the table's order, sort and filter.
+  const columns = columnsWithData(comparison);
   const rows = visibleRows(comparison.matched);
 
   const lines = [

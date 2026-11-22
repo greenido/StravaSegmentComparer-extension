@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 🆕 Improvements
+
+- **A table that fits the popup**: the popup shows the times and the gaps —
+  segment, both times, Time Diff, Time Diff % and Speed/Pace Diff. "Show all
+  columns" adds the rest (speeds, power, heart rate, Form, VAM, PRs and your
+  history), and the choice is remembered. Open in tab always shows every
+  column. The CSV always has every column with data, whatever is on screen
+
 ### 🔧 Fixes and internals
 
 - The URL fields and the table can no longer disagree in silence. Opening the

@@ -57,6 +57,23 @@ async function loadPopup(chromeOverrides) {
   await new Promise(resolve => setTimeout(resolve, 0));
 }
 
+/** A chrome.storage.local stub that starts out holding `store`. */
+function storageWith(store) {
+  return {
+    local: {
+      get: async keys => Object.fromEntries([].concat(keys).filter(key => key in store).map(key => [key, store[key]])),
+      set: async values => Object.assign(store, values),
+      remove: async keys => [].concat(keys).forEach(key => delete store[key])
+    }
+  };
+}
+
+// The popup shows only the core columns by default; suites about the other
+// columns turn them all on first, as a user would.
+function showEveryColumn() {
+  document.getElementById('columnsToggle').click();
+}
+
 /** Run `download`, returning the CSV text it handed to the Blob. */
 async function capturedCsv(download) {
   const captured = [];
@@ -406,6 +423,7 @@ describe('segments inside other segments', () => {
 describe('reading the table without colour', () => {
   beforeEach(async () => {
     await loadPopup();
+    showEveryColumn();
   });
 
   it('marks every shaded delta with an arrow as well as a tint', () => {
@@ -455,6 +473,91 @@ describe('reading the table without colour', () => {
   });
 });
 
+describe('the core columns and the rest', () => {
+  const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+  const toggle = () => document.getElementById('columnsToggle');
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const withPower = () => [row({ power_1: '250 W', power_2: '260 W', power_diff: '+10 W', power_diff_value: 10 })];
+
+  let store;
+
+  // A popup opened on a saved comparison, as the user would find it.
+  const open = async (matched = withPower(), saved = {}) => {
+    store = { comparisonResults: { matched, onlyIn1: [], onlyIn2: [] }, ...saved };
+    await loadPopup({ storage: storageWith(store) });
+    await settle();
+  };
+
+  it('shows the times and the gaps in the popup, and offers the rest', async () => {
+    await open();
+
+    expect(headers()).toEqual([
+      'Segment Name',
+      'Time (Activity 1)',
+      'Time (Activity 2)',
+      'Time Diff',
+      'Time Diff %',
+      'Speed Diff'
+    ]);
+    // Two speeds and three power columns are held back.
+    expect(toggle().classList.contains('hidden')).toBe(false);
+    expect(toggle().textContent).toBe('Show all columns (+5)');
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('counts only the columns this comparison has data for', async () => {
+    // No power, heart rate, VAM or PRs: only the two speeds are held back.
+    await open([row()]);
+    expect(toggle().textContent).toBe('Show all columns (+2)');
+  });
+
+  it('shows every column on request, and goes back again', async () => {
+    await open();
+
+    toggle().click();
+    expect(headers()).toContain('Power Diff');
+    expect(headers()).toContain('Speed (Activity 1)');
+    expect(toggle().textContent).toBe('Show fewer columns');
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+
+    toggle().click();
+    expect(headers()).not.toContain('Power Diff');
+  });
+
+  it('remembers the choice for the next time the popup opens', async () => {
+    await open();
+    toggle().click();
+    await settle();
+    expect(store.showAllColumns).toBe(true);
+  });
+
+  it('starts with every column when that was the choice last time', async () => {
+    await open(withPower(), { showAllColumns: true });
+    expect(headers()).toContain('Power Diff');
+  });
+
+  it('goes back to course order when the sorted column is put away', async () => {
+    await open();
+    toggle().click();
+    [...document.querySelectorAll('#segmentsTable thead th')].find(th => th.textContent === 'Power Diff').click();
+    expect(document.querySelector('th[aria-sort="descending"], th[aria-sort="ascending"]')).not.toBeNull();
+
+    toggle().click();
+    expect(document.querySelector('th[aria-sort="descending"], th[aria-sort="ascending"]')).toBeNull();
+  });
+
+  it('exports every column with data, whatever the popup is showing', async () => {
+    await open();
+
+    const csv = await capturedCsv(() => exportAsCSV());
+    const header = csv.split('\n')[0];
+    expect(header).toContain('"Power Diff"');
+    expect(header).toContain('"Speed (Activity 1)"');
+  });
+});
+
 describe('opening the comparison in a tab', () => {
   it('opens the same page with the popup size limits lifted', async () => {
     await loadPopup();
@@ -481,6 +584,26 @@ describe('opening the comparison in a tab', () => {
 
     expect(document.body.classList.contains('view-tab')).toBe(true);
     expect(document.getElementById('openTabBtn').classList.contains('hidden')).toBe(true);
+
+    window.history.replaceState({}, '', url.pathname);
+  });
+
+  it('always shows every column there, with nothing to toggle', async () => {
+    const url = new URL(window.location.href);
+    url.search = '?view=tab';
+    window.history.replaceState({}, '', url);
+
+    await loadPopup();
+    renderComparison({
+      matched: [row({ power_1: '250 W', power_2: '260 W', power_diff: '+10 W', power_diff_value: 10 })],
+      onlyIn1: [],
+      onlyIn2: []
+    });
+
+    const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
+    expect(headers).toContain('Power Diff');
+    expect(headers).toContain('Speed (Activity 1)');
+    expect(document.getElementById('columnsToggle').classList.contains('hidden')).toBe(true);
 
     window.history.replaceState({}, '', url.pathname);
   });
@@ -660,6 +783,7 @@ describe('sorting by a column header', () => {
 describe('power columns', () => {
   beforeEach(async () => {
     await loadPopup();
+    showEveryColumn();
   });
 
   it('are hidden when neither activity recorded power', () => {
@@ -700,6 +824,7 @@ describe('power columns', () => {
 describe('heart rate, VAM and medals', () => {
   beforeEach(async () => {
     await loadPopup();
+    showEveryColumn();
   });
 
   const headers = () => [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
@@ -876,6 +1001,7 @@ describe('comparing two activities that are already open', () => {
   });
 
   it('labels the rate columns Pace and names them after the athletes', () => {
+    showEveryColumn();
     const headers = [...document.querySelectorAll('#segmentsTable thead th')].map(th => th.textContent);
 
     expect(headers).toContain('Time (Ada)');
@@ -1023,16 +1149,9 @@ describe('a restored comparison and the URL fields', () => {
         ...saved
       }
     };
-    const storage = {
-      local: {
-        get: async keys => Object.fromEntries([].concat(keys).filter(k => k in store).map(k => [k, store[k]])),
-        set: async values => Object.assign(store, values),
-        remove: async keys => [].concat(keys).forEach(key => delete store[key])
-      }
-    };
     let extracted = 0;
     await loadPopup({
-      storage,
+      storage: storageWith(store),
       tabs: {
         ...stubChrome().tabs,
         query: async () => tabs,
@@ -1634,6 +1753,7 @@ describe('comparing against your personal records', () => {
 
   const setup = async (prBySegmentId, overrides = {}) => {
     await loadPopup();
+    showEveryColumn();
     sent = [];
 
     chrome.tabs.query = async () => [
