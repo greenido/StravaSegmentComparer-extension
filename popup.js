@@ -49,6 +49,12 @@ let athlete1Name = null;
 let athlete2Name = null;
 let rateLabel = 'Speed';
 
+// Which two activities the comparison on screen is of, as ids. The URL fields
+// can change underneath it — auto-detect on open, typing, a swap — so this is
+// what says whether they still describe the table. null when unknown: nothing
+// compared yet, or a comparison saved before the ids were.
+let comparedIds = null;
+
 // null key means "activity 1 page order", which is course order and therefore
 // meaningful in its own right. Sorting is opt-in, by clicking a header.
 let sortState = { key: null, direction: 'desc' };
@@ -114,6 +120,10 @@ async function restoreState() {
     comparison = { matched: saved.matched, onlyIn1: saved.onlyIn1 || [], onlyIn2: saved.onlyIn2 || [] };
     rateLabel = saved.rateLabel || 'Speed';
     lastStats = { stats1: saved.stats1 || [], stats2: saved.stats2 || [] };
+    comparedIds =
+      saved.activity1Id && saved.activity2Id
+        ? { activity1: saved.activity1Id, activity2: saved.activity2Id }
+        : null;
     addLogEntry('Restored the previous comparison', 'info');
     renderComparison(comparison);
     if (saved.stats1 || saved.stats2) {
@@ -122,14 +132,39 @@ async function restoreState() {
     resultsDiv.classList.remove('hidden');
   }
 
-  // Open tabs win over saved URLs.
-  autoPopulateActivityUrls({ quiet: true });
+  // Open tabs win over saved URLs: open two rides, click the icon, click
+  // Compare is the quickest path there is, and it stays that way.
+  await autoPopulateActivityUrls({ quiet: true });
+
+  // But then the fields may no longer be what the restored table is of, and
+  // nothing on screen would say so.
+  if (comparisonShowing() && comparedIds && !fieldsMatchComparison()) {
+    showStatus(
+      `The table shows your last comparison (${getDisplayName(1)} vs ${getDisplayName(2)}), ` +
+        'not the activities in the fields above. Click Compare Activities to compare those.',
+      'info'
+    );
+  }
+}
+
+function comparisonShowing() {
+  return !resultsDiv.classList.contains('hidden') && comparison.matched.length > 0;
+}
+
+/** Whether the URL fields name the comparison on screen, in the same order. */
+function fieldsMatchComparison() {
+  return (
+    Boolean(comparedIds) &&
+    extractActivityIdFromUrl(activity1Input.value.trim()) === comparedIds.activity1 &&
+    extractActivityIdFromUrl(activity2Input.value.trim()) === comparedIds.activity2
+  );
 }
 
 async function clearResults() {
   await chrome.storage.local.remove('comparisonResults');
 
   comparison = { matched: [], onlyIn1: [], onlyIn2: [] };
+  comparedIds = null;
   sortState = { key: null, direction: 'desc' };
   filterText = '';
   tableSearch.value = '';
@@ -197,6 +232,16 @@ async function findActivityTabs() {
     .sort((a, b) => a.id - b.id);
 }
 
+/** The window this page belongs to, or null if it cannot be told. */
+async function currentWindowId() {
+  try {
+    const win = await chrome.windows.getCurrent();
+    return win && typeof win.id === 'number' ? win.id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * Fill the URL fields from the open activity tabs.
  *
@@ -222,19 +267,24 @@ async function autoPopulateActivityUrls({ quiet = false } = {}) {
       return;
     }
 
-    activity1Input.value = stravaActivityTabs[0].url;
-    addLogEntry(`Auto-populated Activity 1: ${extractActivityIdFromUrl(stravaActivityTabs[0].url)}`, 'success');
+    const pair = pickActivityTabPair(stravaActivityTabs, await currentWindowId());
 
-    if (stravaActivityTabs.length >= 2) {
-      activity2Input.value = stravaActivityTabs[1].url;
-      addLogEntry(`Auto-populated Activity 2: ${extractActivityIdFromUrl(stravaActivityTabs[1].url)}`, 'success');
+    activity1Input.value = pair[0].url;
+    addLogEntry(`Auto-populated Activity 1: ${extractActivityIdFromUrl(pair[0].url)}`, 'success');
+
+    if (pair.length >= 2) {
+      activity2Input.value = pair[1].url;
+      addLogEntry(`Auto-populated Activity 2: ${extractActivityIdFromUrl(pair[1].url)}`, 'success');
       report('✅ Auto-detected 2 Strava activities - ready to compare!', 'success');
     } else {
       report('⚠️ Found 1 Strava activity - please open another activity tab or enter URL manually', 'info');
     }
 
     if (stravaActivityTabs.length > 2) {
-      addLogEntry(`Note: ${stravaActivityTabs.length} activity tabs open, using the first 2`, 'info');
+      addLogEntry(
+        `Note: ${stravaActivityTabs.length} activity tabs open, using the two you looked at most recently`,
+        'info'
+      );
     }
 
     await chrome.storage.local.set({
@@ -550,6 +600,7 @@ async function readAndCompare() {
 
     rateLabel = rateColumnLabel(activity1Data.segments);
     comparison = compareSegmentLists(activity1Data.segments, activity2Data.segments);
+    comparedIds = { activity1: activity1Id, activity2: activity2Id };
     logNestingSupport(activity1Data.segments, comparison.matched);
     // A fresh comparison starts in course order again.
     sortState = { key: null, direction: 'desc' };
@@ -581,17 +632,25 @@ async function readAndCompare() {
  * PR and history columns read activity 1's times. A comparison on screen is
  * redone the other way round rather than left describing fields that no longer
  * match it; a re-read of open tabs is cheap, and the PR lookup is cached.
+ *
+ * Only when the fields were what the table is of, though. If they already
+ * named other activities, redoing "the comparison" would quietly compare a
+ * different pair than the one on screen, reversed.
  */
 async function swapActivities() {
   if (running) return;
+
+  const redo = comparisonShowing() && fieldsMatchComparison();
 
   [activity1Input.value, activity2Input.value] = [activity2Input.value, activity1Input.value];
   await chrome.storage.local.set({ activity1: activity1Input.value, activity2: activity2Input.value });
   addLogEntry('Swapped activity 1 and activity 2', 'info');
 
-  const showing = !resultsDiv.classList.contains('hidden') && comparison.matched.length > 0;
-  const bothValid = [activity1Input, activity2Input].every(input => isValidStravaActivityUrl(input.value.trim()));
-  if (showing && bothValid) await compareActivities();
+  if (redo) {
+    await compareActivities();
+  } else if (comparisonShowing()) {
+    addLogEntry('The fields were not the comparison on screen, so it was left as it is', 'info');
+  }
 }
 
 /**
@@ -643,6 +702,8 @@ function saveComparison() {
       matched: comparison.matched,
       onlyIn1: comparison.onlyIn1,
       onlyIn2: comparison.onlyIn2,
+      activity1Id: comparedIds ? comparedIds.activity1 : null,
+      activity2Id: comparedIds ? comparedIds.activity2 : null,
       rateLabel,
       stats1: lastStats.stats1,
       stats2: lastStats.stats2

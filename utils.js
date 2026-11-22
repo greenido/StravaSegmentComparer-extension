@@ -890,6 +890,39 @@ function rankSharedActivities(segmentIds, recentBySegmentId, excludeActivityId, 
     .slice(0, limit);
 }
 
+/* ------------------------------------------------------------------ *
+ * Picking tabs to compare
+ * ------------------------------------------------------------------ */
+
+/**
+ * The two open activity tabs to compare, out of however many are open.
+ *
+ * Which two is a question of recency: the tab being looked at when the popup
+ * was opened, then the one used most recently before it. Picking by tab id —
+ * creation order — chose the two oldest, which with a third tab open is
+ * rarely the pair anyone meant.
+ *
+ * Which of the two is activity 1 is a separate question, and keeps its old
+ * answer: the one opened first. Every delta is activity 2 minus activity 1, so
+ * recency deciding the order as well would flip the reading of a familiar
+ * two-tab comparison depending on which tab was clicked last.
+ *
+ * @param {Array<{id: number, active?: boolean, windowId?: number, lastAccessed?: number}>} tabs
+ * @param {number|null} currentWindowId  the window the popup belongs to
+ * @returns {Array} at most two of `tabs`, oldest first
+ */
+function pickActivityTabPair(tabs, currentWindowId = null) {
+  const recency = tab =>
+    tab.active && currentWindowId !== null && tab.windowId === currentWindowId
+      ? Infinity
+      : Number(tab.lastAccessed) || 0;
+
+  return [...(tabs || [])]
+    .sort((a, b) => recency(b) - recency(a) || a.id - b.id)
+    .slice(0, 2)
+    .sort((a, b) => a.id - b.id);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     KM_PER_MILE,
@@ -930,6 +963,7 @@ if (typeof module !== 'undefined' && module.exports) {
     effortHistoryStats,
     applyEffortHistory,
     hasEffortHistory,
-    rankSharedActivities
+    rankSharedActivities,
+    pickActivityTabPair
   };
 }
