@@ -2113,8 +2113,9 @@ describe('finding your other activities on these segments', () => {
       if (request.action === 'fetchSegmentHistory') {
         return { ok: true, pr: { time: '4:00' }, recent: recent[request.segmentId] || [] };
       }
-      if (request.action === 'fetchActivityHtml') {
-        return { ok: true, html: activityHtml(request.activityId, [290, 350, 410]) };
+      if (request.action === 'fetchActivityData') {
+        const doc = new DOMParser().parseFromString(activityHtml(request.activityId, [290, 350, 410]), 'text/html');
+        return { ok: true, data: extractActivityData(doc, `https://www.strava.com/activities/${request.activityId}`) };
       }
       const doc = new DOMParser().parseFromString(activityHtml('1', [300, 360, 420]), 'text/html');
       return { ok: true, data: extractActivityData(doc, 'https://www.strava.com/activities/1') };
@@ -2202,43 +2203,6 @@ describe('finding your other activities on these segments', () => {
     const toStaleTab = sent.filter(r => r.tabId === 30).map(r => r.action);
     expect(toStaleTab.length).toBeGreaterThan(0);
     expect(toStaleTab.every(action => action === 'ping')).toBe(true);
-  });
-});
-
-describe('a comparison asked for by the button on Strava', () => {
-  afterEach(() => window.history.replaceState({}, '', '/'));
-
-  it('compares the two activities the link names, first pick as activity 1', async () => {
-    window.history.replaceState({}, '', '/popup.html?view=tab&compare=111,222');
-    const read = [];
-    await loadPopup({
-      tabs: {
-        ...stubChrome().tabs,
-        query: async () => [
-          { id: 10, url: 'https://www.strava.com/activities/111' },
-          { id: 20, url: 'https://www.strava.com/activities/222' },
-          { id: 30, url: 'https://www.strava.com/activities/333' }
-        ],
-        sendMessage: async (tabId, request) => {
-          if (request.action === 'ping') return { ok: true };
-          read.push(tabId);
-          return {
-            ok: true,
-            data: {
-              athleteName: tabId === 10 ? 'Ada' : 'Grace',
-              activityStats: [],
-              segments: [{ segmentId: '1', occurrence: 0, name: 'Climb', time: tabId === 10 ? '5:00' : '5:10' }]
-            }
-          };
-        }
-      }
-    });
-    for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
-
-    expect(document.getElementById('activity1').value).toBe('https://www.strava.com/activities/111');
-    expect(document.getElementById('activity2').value).toBe('https://www.strava.com/activities/222');
-    expect(read.sort()).toEqual([10, 20]);
-    expect(document.querySelector('.summary-net').textContent).toBe('+0:10');
   });
 });
 

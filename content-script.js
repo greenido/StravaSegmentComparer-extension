@@ -6,8 +6,8 @@
  * another.
  *
  *   extractSegmentData  -> extract from this live page
- *   fetchActivityHtml   -> same-origin fetch of another activity, so the popup
- *                          can parse it without opening a tab
+ *   fetchActivityData   -> same-origin fetch of another activity, parsed here so
+ *                          the popup gets its data without opening a tab
  *   fetchSegmentHistory -> same-origin fetch of your effort history on a
  *                          segment (or, failing that, its page), reduced here
  *                          to your PR and your recent activities there
@@ -91,8 +91,15 @@ async function fetchFromStrava(path, headers = {}) {
   return response;
 }
 
-async function handleFetchActivityHtml(activityId) {
-  return (await fetchFromStrava(`/activities/${activityId}`)).text();
+/**
+ * Parsed here rather than in the popup: DOMParser in an extension page checks
+ * Strava's inline event handlers against the extension's CSP and logs a
+ * violation for each one, though nothing ever runs.
+ */
+async function handleFetchActivityData(activityId) {
+  const html = await (await fetchFromStrava(`/activities/${activityId}`)).text();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return extractActivityData(doc, `https://www.strava.com/activities/${activityId}`);
 }
 
 /**
@@ -146,9 +153,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'fetchActivityHtml') {
-    handleFetchActivityHtml(request.activityId)
-      .then(html => sendResponse({ ok: true, html }))
+  if (request.action === 'fetchActivityData') {
+    handleFetchActivityData(request.activityId)
+      .then(data => sendResponse({ ok: true, data }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }

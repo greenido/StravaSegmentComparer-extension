@@ -1009,18 +1009,6 @@ function activityTitle(title) {
   return first.length > 40 ? `${first.slice(0, 39)}…` : first;
 }
 
-/**
- * The comparison a link asked for, from `?compare=111,222`: what the button on
- * Strava's pages and the right-click menu open. Null unless it names two
- * different activity ids.
- */
-function requestedComparison(search) {
-  const value = new URLSearchParams(search || '').get('compare') || '';
-  const match = /^(\d+),(\d+)$/.exec(value);
-  if (!match || match[1] === match[2]) return null;
-  return { activity1Id: match[1], activity2Id: match[2] };
-}
-
 /* ------------------------------------------------------------------ *
  * Three or more activities
  * ------------------------------------------------------------------ */
@@ -1173,7 +1161,6 @@ if (typeof module !== 'undefined' && module.exports) {
     personalRecordTotalsText,
     rememberComparison,
     activityTitle,
-    requestedComparison,
     compareManySegmentLists,
     summarizeMany,
     distinctDisplayNames,

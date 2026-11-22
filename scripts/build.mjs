@@ -14,7 +14,6 @@ const runtimeFiles = [
   "manifest.json",
   "background.js",
   "content-script.js",
-  "page-button.js",
   "extractor.js",
   "popup.html",
   "popup.js",

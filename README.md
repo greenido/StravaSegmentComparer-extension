@@ -9,7 +9,6 @@ If you have questions or issues, please open an issue on GitHub.
 ## Features
 
 - **Auto-detect open Strava activity tabs**: Fills the URLs from your open activity tabs — the one you are looking at and the one you used before it, with the one opened first as activity 1. Opening the popup does this quietly; the Auto-Detect button also says what it found
-- **Compare from Strava's pages**: A “⇄ Compare…” button on every activity page, and the same in the right-click menu on activity links. Pick one activity, then another, and the comparison opens in a tab
 - **Manual URL entry**: Paste activity URLs if auto-detect isn’t used
 - **Recent comparisons**: The last ten pairs, one pick away from being compared again
 - **Up to five activities**: Add activities 3 to 5 to rank a group ride against activity 1, segment by segment
@@ -62,7 +61,7 @@ shows every column.
 3. Click “Load unpacked” and select this project folder
 4. Pin the extension (optional) and open it from the toolbar
 
-Required permissions: `storage`, `contextMenus` (the right-click “Pick this activity to compare”; no install warning), and host access to `https://www.strava.com/*` (see `manifest.json`). There is no `tabs` permission: host access already shows the extension the URLs of your Strava tabs, and no others.
+Required permissions: `storage` and host access to `https://www.strava.com/*` (see `manifest.json`). There is no `tabs` permission: host access already shows the extension the URLs of your Strava tabs, and no others.
 
 ## Usage
 
@@ -95,19 +94,8 @@ compare as usual. With three or more:
 - Power, heart rate, Form, VAM, the PR lookup, the activity stats panels and
   the image are comparisons of two, and are left out
 - ⇄ swaps activities 1 and 2, which changes who everyone is measured against.
-  A recent pair, or a pair picked on Strava's pages, replaces the extra fields
+  A recent pair replaces the extra fields
 
-### From Strava's pages
-
-1. On an activity page, click “⇄ Compare…” in the bottom-right corner (or
-   right-click an activity link and choose “Pick this activity to compare”)
-2. Open another activity and click “⇄ Compare with …” there (or right-click it)
-3. The comparison opens in a tab, with the first activity you picked as
-   activity 1
-
-The × next to the button cancels a pick. While one is waiting the toolbar icon
-shows a “1”. The button is drawn in its own corner of the window, not inside
-Strava's layout, so a Strava redesign does not move or break it.
 
 ### Recent comparisons
 
@@ -284,11 +272,10 @@ after the page loads. The table is read only when that data is missing.
 Files:
 
 - `extractor.js`: all DOM reading. Every function takes an explicit `Document`, so the same code runs against a live page or against fetched HTML
-- `content-script.js`: request/response bridge on strava.com — extract this page, fetch another activity, or look up your effort history on a segment (your PR and recent activities there; the segment page is the fallback for the PR). It only fetches from an allowlist of paths, and waits for the segments table with a `MutationObserver` instead of a fixed sleep
+- `content-script.js`: request/response bridge on strava.com — extract this page, fetch and read another activity, or look up your effort history on a segment (your PR and recent activities there; the segment page is the fallback for the PR). It only fetches from an allowlist of paths, and waits for the segments table with a `MutationObserver` instead of a fixed sleep
 - `popup.js`: tab detection, route selection, comparison, rendering, CSV export. The table's columns are declared once in `COLUMNS`, which drives the headers, the cells and the CSV together
 - `utils.js`: pure parsing and comparison helpers (times, speeds, paces, power, heart rate, VAM, distances, segment matching, sorting, summary, ranking your activities)
-- `background.js`: MV3 service worker. Closes the background tabs a popup opened if the popup is closed before it could, and keeps the pick made from Strava's pages: the right-click menu, the toolbar badge, and opening the comparison tab on the second pick
-- `page-button.js`: the “⇄ Compare…” button on activity pages, in a shadow root fixed to the window corner. It only draws the pick state the service worker keeps
+- `background.js`: MV3 service worker. Closes the background tabs a popup opened if the popup is closed before it could
 
 ## Development
 

@@ -9,11 +9,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 let onConnect;
 let removed;
-let created;
-let store;
-let listeners;
-let badge;
-let menus;
 
 /** A port as the service worker sees it, with the popup's end in our hands. */
 function connect(name) {
@@ -33,66 +28,15 @@ function connect(name) {
 
 beforeEach(() => {
   removed = [];
-  created = [];
-  store = {};
-  listeners = { installed: [], message: [], menu: [], storage: [] };
-  badge = null;
-  menus = {};
-
-  // Storage that tells its listeners about changes, as Chrome's does.
-  const notify = changes => listeners.storage.forEach(fn => fn(changes, 'local'));
-
   globalThis.chrome = {
     runtime: {
-      lastError: undefined,
-      onInstalled: { addListener: fn => listeners.installed.push(fn) },
-      onConnect: { addListener: fn => (onConnect = fn) },
-      onMessage: { addListener: fn => listeners.message.push(fn) },
-      getURL: path => `chrome-extension://abc/${path}`
+      onInstalled: { addListener: () => {} },
+      onConnect: { addListener: fn => (onConnect = fn) }
     },
     tabs: {
       remove: async tabId => {
         removed.push(tabId);
-      },
-      create: async options => {
-        created.push(options.url);
-        return { id: 7 };
       }
-    },
-    storage: {
-      local: {
-        get: async key => (key in store ? { [key]: store[key] } : {}),
-        set: async values => {
-          const changes = {};
-          Object.entries(values).forEach(([key, value]) => {
-            changes[key] = { oldValue: store[key], newValue: value };
-            store[key] = value;
-          });
-          notify(changes);
-        },
-        remove: async key => {
-          const changes = { [key]: { oldValue: store[key], newValue: undefined } };
-          delete store[key];
-          notify(changes);
-        }
-      },
-      onChanged: { addListener: fn => listeners.storage.push(fn) }
-    },
-    contextMenus: {
-      removeAll: done => {
-        menus = {};
-        done();
-      },
-      create: item => (menus[item.id] = { ...item }),
-      update: (id, props, done) => {
-        if (menus[id]) Object.assign(menus[id], props);
-        if (done) done();
-      },
-      onClicked: { addListener: fn => listeners.menu.push(fn) }
-    },
-    action: {
-      setBadgeText: ({ text }) => (badge = text),
-      setBadgeBackgroundColor: () => {}
     }
   };
   (0, eval)(readFileSync(join(root, 'background.js'), 'utf8'));
@@ -148,88 +92,5 @@ describe('closing the tabs a popup left behind', () => {
 
     expect(() => popup.disconnect()).not.toThrow();
     await new Promise(resolve => setTimeout(resolve, 0));
-  });
-});
-
-describe('picking two activities on Strava', () => {
-  const settle = async () => {
-    for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0));
-  };
-  const message = request =>
-    new Promise(resolve => {
-      const async = listeners.message.map(fn => fn(request, {}, resolve));
-      if (!async.some(Boolean)) resolve(undefined);
-    });
-  const clickMenu = info => listeners.menu.forEach(fn => fn(info));
-  const install = async () => {
-    listeners.installed.forEach(fn => fn());
-    await settle();
-  };
-
-  it('waits after the first pick, then compares on the second, first pick as activity 1', async () => {
-    expect(await message({ action: 'pickActivity', activityId: '111', label: 'Morning Ride' })).toEqual({
-      ok: true,
-      state: 'picked'
-    });
-    expect(store.pendingPick).toEqual({ activityId: '111', label: 'Morning Ride' });
-    expect(created).toEqual([]);
-
-    expect(await message({ action: 'pickActivity', activityId: '222', label: 'Evening Ride' })).toEqual({
-      ok: true,
-      state: 'comparing'
-    });
-    expect(created).toEqual(['chrome-extension://abc/popup.html?view=tab&compare=111,222']);
-    expect(store.pendingPick).toBeUndefined();
-  });
-
-  it('never compares an activity with itself', async () => {
-    await message({ action: 'pickActivity', activityId: '111' });
-    await message({ action: 'pickActivity', activityId: '111' });
-
-    expect(created).toEqual([]);
-    expect(store.pendingPick.activityId).toBe('111');
-  });
-
-  it('refuses anything that is not an activity id', async () => {
-    const response = await message({ action: 'pickActivity', activityId: '../settings' });
-    expect(response.ok).toBe(false);
-    expect(store.pendingPick).toBeUndefined();
-  });
-
-  it('keeps a long page title short', async () => {
-    await message({ action: 'pickActivity', activityId: '111', label: 'x'.repeat(200) });
-    expect(store.pendingPick.label).toHaveLength(60);
-  });
-
-  it('forgets the pick on cancel', async () => {
-    await message({ action: 'pickActivity', activityId: '111' });
-    await message({ action: 'cancelPick' });
-    expect(store.pendingPick).toBeUndefined();
-  });
-
-  it('offers the same picking on activity links and pages', async () => {
-    await install();
-    expect(menus.compareActivityLink.targetUrlPatterns).toEqual(['https://www.strava.com/activities/*']);
-    expect(menus.compareActivityPage.documentUrlPatterns).toEqual(['https://www.strava.com/activities/*']);
-
-    clickMenu({ menuItemId: 'compareActivityLink', linkUrl: 'https://www.strava.com/activities/111' });
-    await settle();
-    clickMenu({ menuItemId: 'compareActivityPage', pageUrl: 'https://www.strava.com/activities/222/overview' });
-    await settle();
-
-    expect(created).toEqual(['chrome-extension://abc/popup.html?view=tab&compare=111,222']);
-  });
-
-  it('shows a waiting pick on the toolbar badge and in the menu', async () => {
-    await install();
-    expect(badge).toBe('');
-    expect(menus.compareActivityLink.title).toBe('Pick this activity to compare');
-
-    await message({ action: 'pickActivity', activityId: '111', label: 'Morning Ride' });
-    expect(badge).toBe('1');
-    expect(menus.compareActivityLink.title).toBe('Compare with Morning Ride');
-
-    await message({ action: 'cancelPick' });
-    expect(badge).toBe('');
   });
 });
